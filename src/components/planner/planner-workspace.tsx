@@ -1613,6 +1613,7 @@ export function PlannerWorkspace() {
                   columns={columns}
                   selectedTaskIds={selectedTaskIds}
                   onToggleSelect={handleToggleSelect}
+                  onColumnsChange={handleColumnsChange}
                   onAddAtEnd={() => { void handleAddTask(); }}
                   onDuplicate={(taskId) => { void handleDuplicateTask(taskId); }}
                 />

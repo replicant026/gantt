@@ -15,11 +15,12 @@ describe("column-config", () => {
   });
 
   it("applyColumnConfig aplica visible e order corretos", () => {
-    const saved = [{ id: "kind" as const, visible: false, order: 99 }];
+    const saved = [{ id: "kind" as const, visible: false, order: 99, width: 222 }];
     const result = applyColumnConfig(DEFAULT_COLUMNS, saved);
     const kindCol = result.find((c) => c.id === "kind");
     expect(kindCol?.visible).toBe(false);
     expect(kindCol?.order).toBe(99);
+    expect(kindCol?.width).toBe(222);
   });
 
   it("colunas não removíveis são wbs, name e actions", () => {

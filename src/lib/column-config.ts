@@ -38,7 +38,9 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: "actions",      label: "Ações",          width: 188, visible: true,  order: 12, removable: false },
 ];
 
-type SavedColumnEntry = Pick<ColumnDef, "id" | "visible" | "order">;
+type SavedColumnEntry = Pick<ColumnDef, "id" | "visible" | "order"> & {
+  width?: number;
+};
 
 export function applyColumnConfig(
   defaults: ColumnDef[],
@@ -49,7 +51,15 @@ export function applyColumnConfig(
     .map((col) => {
       const s = savedMap.get(col.id);
       if (!s) return col;
-      return { ...col, visible: s.visible, order: s.order };
+      return {
+        ...col,
+        visible: s.visible,
+        order: s.order,
+        width:
+          typeof s.width === "number"
+            ? Math.max(56, Math.min(680, s.width))
+            : col.width,
+      };
     })
     .sort((a, b) => a.order - b.order);
 }
@@ -66,8 +76,11 @@ export function loadColumnConfig(projectId: string): ColumnDef[] {
 }
 
 export function saveColumnConfig(projectId: string, columns: ColumnDef[]): void {
-  const minimal: SavedColumnEntry[] = columns.map(({ id, visible, order }) => ({
-    id, visible, order,
+  const minimal: SavedColumnEntry[] = columns.map(({ id, visible, order, width }) => ({
+    id,
+    visible,
+    order,
+    width,
   }));
   localStorage.setItem(`col-cfg-${projectId}`, JSON.stringify(minimal));
 }

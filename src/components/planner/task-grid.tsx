@@ -18,7 +18,7 @@ import {
 
 import { formatDependencyLinks, isTaskOverdue } from "@/lib/planner-engine";
 import type { ResolvedTask, TaskKind, TaskStatus, TaskPriority } from "@/types/planner";
-import type { ColumnDef } from "@/lib/column-config";
+import type { ColumnDef, ColumnId } from "@/lib/column-config";
 import { NotesPopover } from "./notes-popover";
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string; color: string }[] = [
@@ -69,6 +69,7 @@ type TaskGridProps = {
   onDuplicate: (taskId: string) => void;
   selectedTaskIds: Set<string>;
   onToggleSelect: (taskId: string, multi: boolean) => void;
+  onColumnsChange: (columns: ColumnDef[]) => void;
 };
 
 function commitOnEnter(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
@@ -111,6 +112,7 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
     onDuplicate,
     selectedTaskIds,
     onToggleSelect,
+    onColumnsChange,
   }, ref) {
   const draggedIdRef = useRef<string | null>(null);
   const dragStartXRef = useRef<number | null>(null);
@@ -129,6 +131,60 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
 
   const visibleColumns = columns.filter((c) => c.visible);
   const totalWidth = visibleColumns.reduce((sum, c) => sum + c.width, 0);
+  const [dragHeaderId, setDragHeaderId] = useState<ColumnId | null>(null);
+
+  function handleReorderColumns(fromId: ColumnId, toId: ColumnId) {
+    if (fromId === toId) {
+      return;
+    }
+
+    const fromIndex = columns.findIndex((col) => col.id === fromId);
+    const toIndex = columns.findIndex((col) => col.id === toId);
+    if (fromIndex === -1 || toIndex === -1) {
+      return;
+    }
+
+    const next = [...columns];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    onColumnsChange(next.map((col, index) => ({ ...col, order: index })));
+  }
+
+  function startColumnResize(event: React.PointerEvent<HTMLDivElement>, columnId: ColumnId) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const column = columns.find((item) => item.id === columnId);
+    if (!column) {
+      return;
+    }
+
+    const startWidth = column.width;
+    const target = event.currentTarget;
+    target.setPointerCapture(pointerId);
+
+    const move = (moveEvent: PointerEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const nextWidth = Math.max(56, Math.min(680, Math.round(startWidth + delta)));
+      const nextColumns = columns.map((item) =>
+        item.id === columnId ? { ...item, width: nextWidth } : item,
+      );
+      onColumnsChange(nextColumns);
+    };
+
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      if (target.hasPointerCapture(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  }
 
   return (
     <div ref={ref} className="planner-scrollbar h-full overflow-auto bg-white">
@@ -145,8 +201,31 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
         <thead>
           <tr className="sticky top-0 z-10 border-b border-[var(--border)] bg-[#f5f7f3] text-left text-[11px] uppercase tracking-[0.16em] text-[var(--muted-soft)]">
             {visibleColumns.map((col) => (
-              <th key={col.id} className={`py-2.5 font-semibold ${col.id === "wbs" ? "" : "px-3"}`}>
-                {col.label}
+              <th
+                key={col.id}
+                className={`group relative select-none py-2.5 font-semibold ${col.id === "wbs" ? "" : "px-3"}`}
+                draggable
+                onDragStart={() => setDragHeaderId(col.id)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => {
+                  if (dragHeaderId) {
+                    handleReorderColumns(dragHeaderId, col.id);
+                  }
+                  setDragHeaderId(null);
+                }}
+                onDragEnd={() => setDragHeaderId(null)}
+              >
+                <span className="pr-2">{col.label}</span>
+                <div
+                  className="absolute right-0 top-0 h-full w-2 cursor-col-resize opacity-0 transition group-hover:opacity-100"
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onPointerDown={(event) => startColumnResize(event, col.id)}
+                  title="Arraste para redimensionar"
+                />
+                <div className="pointer-events-none absolute right-0 top-1.5 h-[calc(100%-12px)] w-px bg-[var(--border)]" />
               </th>
             ))}
           </tr>
