@@ -1436,23 +1436,23 @@ export function PlannerWorkspace() {
                 })
               }
               onExportPdf={() => {
-                const el = ganttExportRef.current?.exportElement;
+                const el = splitContainerRef.current;
                 if (!el) {
-                  pushNotice("error", "O painel Gantt precisa estar visível para exportar em PDF.");
+                  pushNotice("error", "Não foi possível capturar a área de trabalho para exportar.");
                   return;
                 }
                 exportGanttPdf(el, resolvedProject.project).catch(() => {
-                  pushNotice("error", "Não foi possível exportar o Gantt como PDF.");
+                  pushNotice("error", "Não foi possível exportar como PDF.");
                 });
               }}
               onExportPng={() => {
-                const el = ganttExportRef.current?.exportElement;
+                const el = splitContainerRef.current;
                 if (!el) {
-                  pushNotice("error", "O painel Gantt precisa estar visível para exportar em PNG.");
+                  pushNotice("error", "Não foi possível capturar a área de trabalho para exportar.");
                   return;
                 }
                 exportGanttPng(el, resolvedProject.project).catch(() => {
-                  pushNotice("error", "Não foi possível exportar o Gantt como PNG.");
+                  pushNotice("error", "Não foi possível exportar como PNG.");
                 });
               }}
               onExportXlsx={() => exportProjectXlsx(resolvedProject.project, resolvedProject.resolvedTasks)}
