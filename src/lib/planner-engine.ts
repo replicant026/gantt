@@ -625,6 +625,12 @@ export function buildTaskPatchFromEndDate(
   };
 }
 
+export function isTaskOverdue(task: Pick<ResolvedTask, "endDate" | "status" | "computedKind">): boolean {
+  if (task.status === "done" || task.computedKind !== "task") return false;
+  const today = new Date().toISOString().slice(0, 10);
+  return task.endDate < today;
+}
+
 export function calculatePlannerStats(
   resolvedTasks: ResolvedTask[],
   dependencyCount: number,

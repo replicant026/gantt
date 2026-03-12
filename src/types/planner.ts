@@ -1,6 +1,8 @@
 export type ISODate = string;
 export type ISODateTime = string;
 export type TaskKind = "task" | "milestone";
+export type TaskStatus = "pending" | "in_progress" | "done" | "blocked";
+export type TaskPriority = "none" | "low" | "medium" | "high";
 export type ComputedTaskKind = TaskKind | "summary";
 export type DependencyType = "FS" | "SS" | "FF" | "SF";
 export type ChartViewMode = "Day" | "Week" | "Month";
@@ -61,6 +63,9 @@ export interface TaskRecord {
   durationDays: number;
   progress: number;
   notes: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee: string;
   collapsed: boolean;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;

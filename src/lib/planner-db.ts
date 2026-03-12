@@ -30,6 +30,21 @@ class PlannerDb extends Dexie {
       views: "projectId",
       snapshots: "id, projectId, createdAt",
     });
+
+    this.version(2).stores({
+      projects: "id, updatedAt",
+      tasks: "id, projectId, parentId, order, code, status, priority, [projectId+order], [projectId+parentId], [projectId+status]",
+      dependencies:
+        "id, projectId, predecessorId, successorId, [projectId+predecessorId], [projectId+successorId]",
+      views: "projectId",
+      snapshots: "id, projectId, createdAt",
+    }).upgrade(async (tx) => {
+      await tx.table("tasks").toCollection().modify((task: Record<string, unknown>) => {
+        if (task["status"] === undefined) task["status"] = "pending";
+        if (task["priority"] === undefined) task["priority"] = "none";
+        if (task["assignee"] === undefined) task["assignee"] = "";
+      });
+    });
   }
 }
 
@@ -54,6 +69,9 @@ function createStarterTask(projectId: string, code = 1, order = 10): TaskRecord 
     durationDays: 1,
     progress: 0,
     notes: "",
+    status: "pending" as const,
+    priority: "none" as const,
+    assignee: "",
     collapsed: false,
     createdAt: timestamp,
     updatedAt: timestamp,

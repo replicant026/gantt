@@ -7,6 +7,7 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   CornerDownRight,
   CornerUpLeft,
   GripVertical,
@@ -14,9 +15,23 @@ import {
   Trash2,
 } from "lucide-react";
 
-import { formatDependencyLinks } from "@/lib/planner-engine";
-import type { ResolvedTask, TaskKind } from "@/types/planner";
+import { formatDependencyLinks, isTaskOverdue } from "@/lib/planner-engine";
+import type { ResolvedTask, TaskKind, TaskStatus, TaskPriority } from "@/types/planner";
 import { NotesPopover } from "./notes-popover";
+
+const STATUS_OPTIONS: { value: TaskStatus; label: string; color: string }[] = [
+  { value: "pending",     label: "Pendente",      color: "text-slate-600 bg-slate-50" },
+  { value: "in_progress", label: "Em andamento",  color: "text-blue-700 bg-blue-50" },
+  { value: "done",        label: "Concluída",     color: "text-emerald-700 bg-emerald-50" },
+  { value: "blocked",     label: "Bloqueada",     color: "text-rose-700 bg-rose-50" },
+];
+
+const PRIORITY_OPTIONS: { value: TaskPriority; label: string; color: string }[] = [
+  { value: "none",   label: "—",      color: "text-[var(--muted-soft)]" },
+  { value: "low",    label: "Baixa",  color: "text-slate-600" },
+  { value: "medium", label: "Média",  color: "text-amber-700" },
+  { value: "high",   label: "Alta",   color: "text-rose-700 font-semibold" },
+];
 
 type TaskGridProps = {
   tasks: ResolvedTask[];
@@ -40,6 +55,9 @@ type TaskGridProps = {
   onCommitNotes: (taskId: string, notes: string) => void;
   onDelete: (taskId: string) => void;
   onReorder: (taskId: string, targetIndex: number) => void;
+  onCommitStatus: (taskId: string, status: TaskStatus) => void;
+  onCommitPriority: (taskId: string, priority: TaskPriority) => void;
+  onCommitAssignee: (taskId: string, assignee: string) => void;
 };
 
 function commitOnEnter(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
@@ -74,6 +92,9 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
     onOutdent,
     onToggleCollapse,
     onReorder,
+    onCommitStatus,
+    onCommitPriority,
+    onCommitAssignee,
   }, ref) {
   const draggedIdRef = useRef<string | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -94,7 +115,7 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
         className="border-b border-[var(--border)] bg-[#f5f7f3]"
         style={{ height: headerOffset }}
       />
-      <table className="w-[1328px] border-collapse text-sm">
+      <table className="w-[1698px] border-collapse text-sm">
         <colgroup>
           <col style={{ width: 72 }} />
           <col style={{ width: 320 }} />
@@ -105,6 +126,9 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
           <col style={{ width: 180 }} />
           <col style={{ width: 168 }} />
           <col style={{ width: 78 }} />
+          <col style={{ width: 130 }} />
+          <col style={{ width: 100 }} />
+          <col style={{ width: 140 }} />
           <col style={{ width: 188 }} />
         </colgroup>
         <thead>
@@ -118,17 +142,23 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
             <th className="px-3 py-2.5 font-semibold">Predecessoras</th>
             <th className="px-3 py-2.5 font-semibold">Sucessoras</th>
             <th className="px-3 py-2.5 font-semibold">%</th>
+            <th className="px-3 py-2.5 font-semibold">Status</th>
+            <th className="px-3 py-2.5 font-semibold">Prioridade</th>
+            <th className="px-3 py-2.5 font-semibold">Responsável</th>
             <th className="px-3 py-2.5 font-semibold">Ações</th>
           </tr>
         </thead>
         <tbody>
           {tasks.map((task, index) => {
             const selected = task.id === selectedTaskId;
+            const overdue = isTaskOverdue(task);
             const rowTone = task.isSummary
               ? "bg-[#f4f8f4]"
               : selected
                 ? "bg-[var(--accent-soft)]/70"
-                : "bg-white";
+                : overdue
+                  ? "bg-rose-50"
+                  : "bg-white";
             const predecessors = formatDependencyLinks(task.predecessorLinks);
             const successors = formatDependencyLinks(task.successorLinks);
 
@@ -199,7 +229,7 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                     ) : (
                       <div className="h-2.5 w-2.5 rounded-full border border-[var(--border-strong)] bg-white" />
                     )}
-                    <div className="min-w-[280px] flex-1">
+                    <div className="min-w-[280px] flex-1 flex items-center">
                       <input
                         className={`w-full rounded-md border px-2.5 text-sm font-medium text-[var(--foreground)] outline-none transition ${
                           task.isSummary
@@ -216,6 +246,9 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                         }}
                         onKeyDown={commitOnEnter}
                       />
+                      {isTaskOverdue(task) && (
+                        <CircleAlert className="ml-1 inline h-3 w-3 flex-shrink-0 text-rose-500" title="Tarefa atrasada" />
+                      )}
                     </div>
                   </div>
                 </td>
@@ -336,6 +369,49 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                       type="number"
                     />
                   )}
+                </td>
+                <td className="px-2 align-middle" style={cellStyle}>
+                  <select
+                    className={`w-full cursor-pointer rounded px-1 text-xs font-medium outline-none ${
+                      STATUS_OPTIONS.find((o) => o.value === (task.status ?? "pending"))?.color ?? ""
+                    }`}
+                    style={{ height: controlHeight, border: "none" }}
+                    value={task.status ?? "pending"}
+                    onChange={(e) => onCommitStatus(task.id, e.target.value as TaskStatus)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {STATUS_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-2 align-middle" style={cellStyle}>
+                  <select
+                    className={`w-full cursor-pointer rounded px-1 text-xs outline-none ${
+                      PRIORITY_OPTIONS.find((o) => o.value === (task.priority ?? "none"))?.color ?? ""
+                    }`}
+                    style={{ height: controlHeight, border: "none" }}
+                    value={task.priority ?? "none"}
+                    onChange={(e) => onCommitPriority(task.id, e.target.value as TaskPriority)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {PRIORITY_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </td>
+                <td className="px-3 align-middle" style={cellStyle}>
+                  <input
+                    className="w-full rounded border border-transparent bg-transparent px-1 text-sm text-[var(--foreground)] transition focus:border-[var(--border)] focus:bg-white focus:outline-none"
+                    defaultValue={task.assignee ?? ""}
+                    key={`${task.id}-assignee-${task.assignee}`}
+                    placeholder="—"
+                    style={{ height: controlHeight }}
+                    onBlur={(e) => onCommitAssignee(task.id, e.target.value.trim())}
+                    onKeyDown={commitOnEnter}
+                    onClick={(e) => e.stopPropagation()}
+                    type="text"
+                  />
                 </td>
                 <td className="px-3 align-middle" style={cellStyle}>
                   <div className="flex flex-wrap gap-1" style={{ maxHeight: rowHeight - cellPaddingY * 2, overflow: "hidden" }}>

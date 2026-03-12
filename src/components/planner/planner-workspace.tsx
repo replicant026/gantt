@@ -932,6 +932,9 @@ export function PlannerWorkspace() {
       durationDays: 1,
       progress: 0,
       notes: "",
+      status: "pending" as const,
+      priority: "none" as const,
+      assignee: "",
       collapsed: false,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -1418,6 +1421,15 @@ export function PlannerWorkspace() {
                   }}
                   onCommitNotes={(taskId, notes) => {
                     void updateTask(taskId, (task) => ({ ...task, notes }));
+                  }}
+                  onCommitStatus={(taskId, status) => {
+                    void updateTask(taskId, (task) => ({ ...task, status }));
+                  }}
+                  onCommitPriority={(taskId, priority) => {
+                    void updateTask(taskId, (task) => ({ ...task, priority }));
+                  }}
+                  onCommitAssignee={(taskId, assignee) => {
+                    void updateTask(taskId, (task) => ({ ...task, assignee }));
                   }}
                   onDelete={(taskId) => {
                     const task = visibleTasks.find((t) => t.id === taskId);

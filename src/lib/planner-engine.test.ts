@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatDependencyLinks,
+  isTaskOverdue,
   parseDependencyInput,
   resolvePlannerProject,
 } from "@/lib/planner-engine";
@@ -39,6 +40,9 @@ function createTask(partial: Partial<TaskRecord> & Pick<TaskRecord, "id" | "code
     durationDays: partial.durationDays ?? 1,
     progress: partial.progress ?? 0,
     notes: partial.notes ?? "",
+    status: partial.status ?? "pending",
+    priority: partial.priority ?? "none",
+    assignee: partial.assignee ?? "",
     collapsed: partial.collapsed ?? false,
     createdAt: "2026-03-02T12:00:00.000Z",
     updatedAt: "2026-03-02T12:00:00.000Z",
@@ -289,4 +293,22 @@ describe("resolvePlannerProject", () => {
 
 it("MAX_SNAPSHOTS é 20", () => {
   expect(MAX_SNAPSHOTS).toBe(20);
+});
+
+describe("isTaskOverdue", () => {
+  it("retorna false para tarefa concluída mesmo vencida", () => {
+    expect(isTaskOverdue({ endDate: "2020-01-01", status: "done", computedKind: "task" })).toBe(false);
+  });
+  it("retorna false para milestone", () => {
+    expect(isTaskOverdue({ endDate: "2020-01-01", status: "pending", computedKind: "milestone" })).toBe(false);
+  });
+  it("retorna true para task pendente com endDate no passado", () => {
+    expect(isTaskOverdue({ endDate: "2020-01-01", status: "pending", computedKind: "task" })).toBe(true);
+  });
+  it("retorna false para task com endDate futuro", () => {
+    const future = new Date();
+    future.setFullYear(future.getFullYear() + 1);
+    const iso = future.toISOString().slice(0, 10);
+    expect(isTaskOverdue({ endDate: iso, status: "pending", computedKind: "task" })).toBe(false);
+  });
 });
