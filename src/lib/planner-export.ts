@@ -1,5 +1,5 @@
 import { PDFDocument } from "pdf-lib";
-import { toPng } from "html-to-image";
+import html2canvas from "html2canvas";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 
@@ -65,18 +65,22 @@ export function exportProjectXlsx(project: ProjectRecord, tasks: ResolvedTask[])
   XLSX.writeFile(workbook, `${createFileSlug(project)}.xlsx`);
 }
 
+async function elementToCanvas(element: HTMLElement): Promise<HTMLCanvasElement> {
+  return html2canvas(element, {
+    scale: 2,
+    backgroundColor: "#f4f5ef",
+    useCORS: true,
+    logging: false,
+  });
+}
+
 export async function exportGanttPng(
   element: HTMLElement,
   project: ProjectRecord,
 ): Promise<void> {
-  const dataUrl = await toPng(element, {
-    cacheBust: true,
-    pixelRatio: 2,
-    backgroundColor: "#f4f5ef",
-    skipFonts: true,
-  });
+  const canvas = await elementToCanvas(element);
   const anchor = document.createElement("a");
-  anchor.href = dataUrl;
+  anchor.href = canvas.toDataURL("image/png");
   anchor.download = `${createFileSlug(project)}-gantt.png`;
   anchor.click();
 }
@@ -85,12 +89,8 @@ export async function exportGanttPdf(
   element: HTMLElement,
   project: ProjectRecord,
 ): Promise<void> {
-  const dataUrl = await toPng(element, {
-    cacheBust: true,
-    pixelRatio: 2,
-    backgroundColor: "#f4f5ef",
-    skipFonts: true,
-  });
+  const canvas = await elementToCanvas(element);
+  const dataUrl = canvas.toDataURL("image/png");
   const base64 = dataUrl.split(",")[1];
   const binary = atob(base64);
   const pngBytes = new Uint8Array(binary.length);
