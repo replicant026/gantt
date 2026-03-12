@@ -182,12 +182,13 @@ export function PlannerSettingsDrawer({
           </Section>
 
           <Section title="Texto do Gantt">
-            <Field label="Conteúdo do rótulo">
+            <Field label="Rótulo dentro da barra">
               <select
                 className="h-10 w-full rounded-md border border-[var(--border)] bg-white px-3 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
-                onChange={(event) => onChange("labelContent", event.target.value as GanttAppearanceSettings["labelContent"])}
-                value={settings.labelContent}
+                onChange={(event) => onChange("labelInsideContent", event.target.value as GanttAppearanceSettings["labelInsideContent"])}
+                value={settings.labelInsideContent}
               >
+                <option value="none">Nenhum</option>
                 <option value="name">Nome</option>
                 <option value="code-name">Código + nome</option>
                 <option value="name-progress">Nome + progresso</option>
@@ -195,16 +196,34 @@ export function PlannerSettingsDrawer({
                 <option value="wbs-name">WBS + nome</option>
               </select>
             </Field>
-            <Field label="Posição do rótulo">
+
+            <Field label="Rótulo antes da barra (esquerda)">
               <select
                 className="h-10 w-full rounded-md border border-[var(--border)] bg-white px-3 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
-                onChange={(event) => onChange("labelPosition", event.target.value as GanttAppearanceSettings["labelPosition"])}
-                value={settings.labelPosition}
+                onChange={(event) => onChange("labelLeftContent", event.target.value as GanttAppearanceSettings["labelLeftContent"])}
+                value={settings.labelLeftContent}
               >
-                <option value="inside">Dentro da barra</option>
-                <option value="right">À direita</option>
-                <option value="left">À esquerda</option>
-                <option value="hidden">Oculto</option>
+                <option value="none">Nenhum</option>
+                <option value="name">Nome</option>
+                <option value="code-name">Código + nome</option>
+                <option value="name-progress">Nome + progresso</option>
+                <option value="code-name-progress">Código + nome + progresso</option>
+                <option value="wbs-name">WBS + nome</option>
+              </select>
+            </Field>
+
+            <Field label="Rótulo depois da barra (direita)">
+              <select
+                className="h-10 w-full rounded-md border border-[var(--border)] bg-white px-3 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                onChange={(event) => onChange("labelRightContent", event.target.value as GanttAppearanceSettings["labelRightContent"])}
+                value={settings.labelRightContent}
+              >
+                <option value="none">Nenhum</option>
+                <option value="name">Nome</option>
+                <option value="code-name">Código + nome</option>
+                <option value="name-progress">Nome + progresso</option>
+                <option value="code-name-progress">Código + nome + progresso</option>
+                <option value="wbs-name">WBS + nome</option>
               </select>
             </Field>
             <Field label="Fonte do Gantt">

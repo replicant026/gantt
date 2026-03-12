@@ -16,6 +16,7 @@ import { formatHumanDate, formatISODate } from "@/lib/date-utils";
 import type {
   ChartViewMode,
   GanttAppearanceSettings,
+  GanttLabelSlotContent,
   ResolvedTask,
 } from "@/types/planner";
 import type Gantt from "frappe-gantt";
@@ -55,9 +56,13 @@ type GanttTaskShape = {
 
 function formatTaskLabel(
   task: ResolvedTask,
-  appearance: GanttAppearanceSettings,
+  content: GanttLabelSlotContent,
 ): string {
-  switch (appearance.labelContent) {
+  if (content === "none") {
+    return "";
+  }
+
+  switch (content) {
     case "name":
       return task.name;
     case "name-progress":
@@ -92,6 +97,7 @@ function stripSvgAnimations(root: HTMLElement | null) {
 
 function applyLabelPositions(
   root: HTMLElement | null,
+  tasksById: Map<string, ResolvedTask>,
   appearance: GanttAppearanceSettings,
 ) {
   if (!root) {
@@ -99,38 +105,57 @@ function applyLabelPositions(
   }
 
   for (const wrapper of root.querySelectorAll<SVGGElement>(".bar-wrapper")) {
+    const taskId = wrapper.getAttribute("data-id") ?? "";
+    const task = tasksById.get(taskId);
     const bar = wrapper.querySelector<SVGRectElement>(".bar");
     const label = wrapper.querySelector<SVGTextElement>(".bar-label");
 
-    if (!bar || !label) {
+    if (!bar || !label || !task) {
       continue;
     }
 
-    if (appearance.labelPosition === "hidden") {
-      label.style.display = "none";
-      continue;
+    for (const old of wrapper.querySelectorAll<SVGTextElement>(
+      ".bar-label-left, .bar-label-right",
+    )) {
+      old.remove();
     }
 
-    label.style.display = "";
-    label.style.textAnchor = "start";
-    label.classList.add("big");
+    const insideText = formatTaskLabel(task, appearance.labelInsideContent);
+    const leftText = formatTaskLabel(task, appearance.labelLeftContent);
+    const rightText = formatTaskLabel(task, appearance.labelRightContent);
 
-    if (appearance.labelPosition === "inside") {
-      label.classList.remove("big");
-      label.style.textAnchor = "middle";
-      label.setAttribute("x", String(bar.getBBox().x + bar.getBBox().width / 2));
-      continue;
-    }
-
-    const labelWidth = label.getBBox().width;
     const barBox = bar.getBBox();
     const y = barBox.y + barBox.height / 2 + 1;
-    label.setAttribute("y", String(y));
 
-    if (appearance.labelPosition === "left") {
-      label.setAttribute("x", String(barBox.x - labelWidth - 10));
+    if (!insideText) {
+      label.style.display = "none";
     } else {
-      label.setAttribute("x", String(barBox.x + barBox.width + 10));
+      label.style.display = "";
+      label.textContent = insideText;
+      label.classList.remove("big");
+      label.style.textAnchor = "middle";
+      label.setAttribute("x", String(barBox.x + barBox.width / 2));
+      label.setAttribute("y", String(y));
+    }
+
+    if (leftText) {
+      const left = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      left.classList.add("bar-label", "bar-label-left", "big");
+      left.textContent = leftText;
+      left.style.textAnchor = "end";
+      left.setAttribute("x", String(barBox.x - 10));
+      left.setAttribute("y", String(y));
+      wrapper.appendChild(left);
+    }
+
+    if (rightText) {
+      const right = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      right.classList.add("bar-label", "bar-label-right", "big");
+      right.textContent = rightText;
+      right.style.textAnchor = "start";
+      right.setAttribute("x", String(barBox.x + barBox.width + 10));
+      right.setAttribute("y", String(y));
+      wrapper.appendChild(right);
     }
   }
 }
@@ -153,6 +178,13 @@ function applyCriticalPath(
 
     const isCritical = enabled && criticalIds.has(taskId);
     bar.classList.toggle("is-critical", isCritical);
+  }
+
+  for (const arrow of root.querySelectorAll<SVGElement>(".arrow")) {
+    const from = arrow.getAttribute("data-from") ?? "";
+    const to = arrow.getAttribute("data-to") ?? "";
+    const isCritical = enabled && !!from && !!to && criticalIds.has(from) && criticalIds.has(to);
+    arrow.classList.toggle("is-critical", isCritical);
   }
 }
 
@@ -186,7 +218,6 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
       showDependencies,
       showCriticalPath,
       showTodayHighlight,
-      labelPosition,
       fontFamily,
       barHeight,
       rowPadding,
@@ -253,11 +284,15 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
     }, [onVerticalScroll]);
 
     const visibleIds = useMemo(() => new Set(tasks.map((task) => task.id)), [tasks]);
+    const tasksById = useMemo(
+      () => new Map(tasks.map((task) => [task.id, task] as const)),
+      [tasks],
+    );
     const mappedTasks = useMemo<GanttTaskShape[]>(
       () =>
         tasks.map((task) => ({
           id: task.id,
-          name: formatTaskLabel(task, appearance),
+          name: formatTaskLabel(task, appearance.labelInsideContent),
           start: task.startDate,
           end: task.computedKind === "milestone" ? task.startDate : task.endDate,
           progress: task.progress,
@@ -326,7 +361,7 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
 
         requestAnimationFrame(() => {
           stripSvgAnimations(chartRef.current);
-          applyLabelPositions(chartRef.current, appearance);
+          applyLabelPositions(chartRef.current, tasksById, appearance);
           applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
         });
       })();
@@ -334,7 +369,7 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
       return () => {
         cancelled = true;
       };
-    }, [appearance, barHeight, criticalIds, mappedTasks, rowPadding, showCriticalPath, viewMode]);
+    }, [appearance, barHeight, criticalIds, mappedTasks, rowPadding, showCriticalPath, tasksById, viewMode]);
 
     useEffect(() => {
       if (!instanceRef.current || !chartRef.current) {
@@ -354,10 +389,10 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
           nextContainer.scrollTop = previousScrollTop;
         }
         stripSvgAnimations(chartRef.current);
-        applyLabelPositions(chartRef.current, appearance);
+        applyLabelPositions(chartRef.current, tasksById, appearance);
         applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
       });
-    }, [appearance, criticalIds, labelPosition, mappedTasks, showCriticalPath]);
+    }, [appearance, criticalIds, mappedTasks, showCriticalPath, tasksById]);
 
     useEffect(() => {
       if (!instanceRef.current || !chartRef.current) {
@@ -371,10 +406,10 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
 
       requestAnimationFrame(() => {
         stripSvgAnimations(chartRef.current);
-        applyLabelPositions(chartRef.current, appearance);
+        applyLabelPositions(chartRef.current, tasksById, appearance);
         applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
       });
-    }, [appearance, barHeight, criticalIds, rowPadding, showCriticalPath]);
+    }, [appearance, barHeight, criticalIds, rowPadding, showCriticalPath, tasksById]);
 
     useEffect(() => {
       if (!instanceRef.current) {
@@ -385,18 +420,18 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
 
       requestAnimationFrame(() => {
         stripSvgAnimations(chartRef.current);
-        applyLabelPositions(chartRef.current, appearance);
+        applyLabelPositions(chartRef.current, tasksById, appearance);
         applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
       });
-    }, [appearance, criticalIds, showCriticalPath, viewMode]);
+    }, [appearance, criticalIds, showCriticalPath, tasksById, viewMode]);
 
     useEffect(() => {
       requestAnimationFrame(() => {
         stripSvgAnimations(chartRef.current);
-        applyLabelPositions(chartRef.current, appearance);
+        applyLabelPositions(chartRef.current, tasksById, appearance);
         applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
       });
-    }, [appearance, criticalIds, labelPosition, showCriticalPath]);
+    }, [appearance, criticalIds, showCriticalPath, tasksById]);
 
     useEffect(() => {
       if (!chartRef.current) {

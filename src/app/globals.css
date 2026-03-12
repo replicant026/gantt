@@ -113,6 +113,10 @@ textarea {
   stroke: var(--gantt-dependency-color) !important;
 }
 
+.gantt .arrow.is-critical {
+  stroke: #b91c1c !important;
+}
+
 .gantt .today-highlight,
 .gantt .today-highlight rect {
   fill: rgba(37, 95, 72, 0.10) !important;

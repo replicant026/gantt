@@ -1103,8 +1103,22 @@ export function PlannerWorkspace() {
     await persistGraph(nextTasks, resolvedProject.dependencies);
   }
 
-  async function handleReorderTask(taskId: string, targetIndex: number) {
+  async function handleReorderTask(
+    taskId: string,
+    targetIndex: number,
+    intent: "reorder" | "indent" | "outdent" = "reorder",
+  ) {
     if (!resolvedProject) {
+      return;
+    }
+
+    if (intent === "indent") {
+      await handleIndentTask(taskId);
+      return;
+    }
+
+    if (intent === "outdent") {
+      await handleOutdentTask(taskId);
       return;
     }
 
@@ -1585,8 +1599,8 @@ export function PlannerWorkspace() {
                   onOutdent={(taskId) => {
                     void handleOutdentTask(taskId);
                   }}
-                  onReorder={(taskId, targetIndex) => {
-                    void handleReorderTask(taskId, targetIndex);
+                  onReorder={(taskId, targetIndex, intent) => {
+                    void handleReorderTask(taskId, targetIndex, intent);
                   }}
                   onSelectTask={(taskId) => {
                     void updateView({ selectedTaskId: taskId });

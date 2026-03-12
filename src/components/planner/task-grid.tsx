@@ -57,7 +57,11 @@ type TaskGridProps = {
   onAddBelow: (taskId: string) => void;
   onCommitNotes: (taskId: string, notes: string) => void;
   onDelete: (taskId: string) => void;
-  onReorder: (taskId: string, targetIndex: number) => void;
+  onReorder: (
+    taskId: string,
+    targetIndex: number,
+    intent?: "reorder" | "indent" | "outdent",
+  ) => void;
   onCommitStatus: (taskId: string, status: TaskStatus) => void;
   onCommitPriority: (taskId: string, priority: TaskPriority) => void;
   onCommitAssignee: (taskId: string, assignee: string) => void;
@@ -109,7 +113,9 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
     onToggleSelect,
   }, ref) {
   const draggedIdRef = useRef<string | null>(null);
+  const dragStartXRef = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [dragIntent, setDragIntent] = useState<"reorder" | "indent" | "outdent">("reorder");
   const cellPaddingY = 3;
   const controlHeight = Math.max(28, rowHeight - cellPaddingY * 2);
   const cellStyle = {
@@ -521,7 +527,15 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
             return (
               <tr
                 key={`${task.id}-${task.updatedAt}`}
-                className={`border-b border-[var(--border)] align-middle transition hover:bg-[var(--accent-soft)]/35 ${rowTone} ${dragOverIndex === index ? "ring-2 ring-inset ring-[var(--accent)]" : ""}`}
+                className={`border-b border-[var(--border)] align-middle transition hover:bg-[var(--accent-soft)]/35 ${rowTone} ${
+                  dragOverIndex === index
+                    ? dragIntent === "indent"
+                      ? "ring-2 ring-inset ring-emerald-600"
+                      : dragIntent === "outdent"
+                        ? "ring-2 ring-inset ring-amber-600"
+                        : "ring-2 ring-inset ring-[var(--accent)]"
+                    : ""
+                }`}
                 onClick={(e) => {
                   onToggleSelect(task.id, e.ctrlKey || e.metaKey);
                   if (!e.ctrlKey && !e.metaKey) {
@@ -532,6 +546,7 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                 draggable
                 onDragStart={(e) => {
                   draggedIdRef.current = task.id;
+                  dragStartXRef.current = e.clientX;
                   e.dataTransfer.effectAllowed = "move";
                   if (e.currentTarget instanceof HTMLElement) {
                     e.currentTarget.style.opacity = "0.5";
@@ -539,7 +554,9 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                 }}
                 onDragEnd={(e) => {
                   draggedIdRef.current = null;
+                  dragStartXRef.current = null;
                   setDragOverIndex(null);
+                  setDragIntent("reorder");
                   if (e.currentTarget instanceof HTMLElement) {
                     e.currentTarget.style.opacity = "1";
                   }
@@ -548,15 +565,34 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   setDragOverIndex(index);
+                  const startX = dragStartXRef.current;
+                  if (startX === null) {
+                    setDragIntent("reorder");
+                    return;
+                  }
+                  const deltaX = e.clientX - startX;
+                  if (deltaX > 48) {
+                    setDragIntent("indent");
+                  } else if (deltaX < -48) {
+                    setDragIntent("outdent");
+                  } else {
+                    setDragIntent("reorder");
+                  }
                 }}
-                onDragLeave={() => setDragOverIndex(null)}
+                onDragLeave={() => {
+                  setDragOverIndex(null);
+                  setDragIntent("reorder");
+                }}
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragOverIndex(null);
+                  const intent = dragIntent;
+                  setDragIntent("reorder");
                   if (draggedIdRef.current && draggedIdRef.current !== task.id) {
-                    onReorder(draggedIdRef.current, index);
+                    onReorder(draggedIdRef.current, index, intent);
                   }
                   draggedIdRef.current = null;
+                  dragStartXRef.current = null;
                 }}
               >
                 {visibleColumns.map((col) => renderCell(col))}

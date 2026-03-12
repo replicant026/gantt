@@ -13,6 +13,7 @@ export type GanttLabelContent =
   | "name-progress"
   | "code-name-progress"
   | "wbs-name";
+export type GanttLabelSlotContent = GanttLabelContent | "none";
 export type GanttFontFamily = "manrope" | "plex" | "georgia" | "system";
 
 export interface GanttAppearanceSettings {
@@ -27,6 +28,9 @@ export interface GanttAppearanceSettings {
   showTodayHighlight: boolean;
   labelPosition: GanttLabelPosition;
   labelContent: GanttLabelContent;
+  labelInsideContent: GanttLabelSlotContent;
+  labelLeftContent: GanttLabelSlotContent;
+  labelRightContent: GanttLabelSlotContent;
   fontFamily: GanttFontFamily;
   barHeight: number;
   rowPadding: number;
