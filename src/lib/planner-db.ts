@@ -35,6 +35,8 @@ class PlannerDb extends Dexie {
 
 export const plannerDb = new PlannerDb();
 
+export const MAX_SNAPSHOTS = 20;
+
 function createStarterTask(projectId: string, code = 1, order = 10): TaskRecord {
   const timestamp = nowISO();
   const startDate = ensureWorkingDate(todayISO());
@@ -259,6 +261,19 @@ export async function createSnapshot(
   };
 
   await plannerDb.snapshots.add(snapshot);
+
+  // Limitar a MAX_SNAPSHOTS por projeto
+  const allSnapshots = await plannerDb.snapshots
+    .where("projectId")
+    .equals(projectId)
+    .reverse()
+    .sortBy("createdAt");
+
+  if (allSnapshots.length > MAX_SNAPSHOTS) {
+    const toDelete = allSnapshots.slice(MAX_SNAPSHOTS).map((s) => s.id);
+    await plannerDb.snapshots.bulkDelete(toDelete);
+  }
+
   return snapshot;
 }
 

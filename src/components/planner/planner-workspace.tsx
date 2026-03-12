@@ -72,6 +72,7 @@ import { GanttPanel, type GanttPanelHandle } from "./gantt-panel";
 import { UndoManager } from "@/lib/undo-manager";
 import { PlannerSettingsDrawer } from "./planner-settings-drawer";
 import { TaskGrid } from "./task-grid";
+import { ConfirmDialog } from "./confirm-dialog";
 
 type NoticeTone = "success" | "error" | "info";
 type WorkspaceView = "split" | "tasks" | "gantt";
@@ -591,9 +592,14 @@ export function PlannerWorkspace() {
   const noticeTimeoutRef = useRef<number | null>(null);
   const scrollSyncLock = useRef(false);
   const [undoManagerRef] = useState(() => new UndoManager());
+  const [deleteConfirm, setDeleteConfirm] = useState<{ taskId: string; taskName: string } | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         void undoManagerRef.undo();
@@ -1410,8 +1416,12 @@ export function PlannerWorkspace() {
                       buildTaskPatchFromDates(task, startDate, task.endDate),
                     );
                   }}
+                  onCommitNotes={(taskId, notes) => {
+                    void updateTask(taskId, (task) => ({ ...task, notes }));
+                  }}
                   onDelete={(taskId) => {
-                    void handleDeleteTask(taskId);
+                    const task = visibleTasks.find((t) => t.id === taskId);
+                    setDeleteConfirm({ taskId, taskName: task?.name ?? "esta tarefa" });
                   }}
                   onIndent={(taskId) => {
                     void handleIndentTask(taskId);
@@ -1509,6 +1519,21 @@ export function PlannerWorkspace() {
         onClose={() => setIsSettingsOpen(false)}
         onReset={resetAppearance}
         settings={appearance}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        title="Excluir tarefa"
+        description={`Deseja excluir "${deleteConfirm?.taskName}"? Esta ação é permanente e remove também as subtarefas.`}
+        confirmLabel="Excluir"
+        destructive
+        onConfirm={() => {
+          if (deleteConfirm) {
+            void handleDeleteTask(deleteConfirm.taskId);
+            setDeleteConfirm(null);
+          }
+        }}
+        onCancel={() => setDeleteConfirm(null)}
       />
     </div>
   );

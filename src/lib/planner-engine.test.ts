@@ -5,6 +5,7 @@ import {
   parseDependencyInput,
   resolvePlannerProject,
 } from "@/lib/planner-engine";
+import { MAX_SNAPSHOTS } from "@/lib/planner-db";
 import type {
   DependencyRecord,
   PlannerProjectBundle,
@@ -284,4 +285,8 @@ describe("resolvePlannerProject", () => {
       ]),
     ).toBe("12, 18FF+2d");
   });
+});
+
+it("MAX_SNAPSHOTS é 20", () => {
+  expect(MAX_SNAPSHOTS).toBe(20);
 });

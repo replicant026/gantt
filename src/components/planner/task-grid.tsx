@@ -16,6 +16,7 @@ import {
 
 import { formatDependencyLinks } from "@/lib/planner-engine";
 import type { ResolvedTask, TaskKind } from "@/types/planner";
+import { NotesPopover } from "./notes-popover";
 
 type TaskGridProps = {
   tasks: ResolvedTask[];
@@ -36,6 +37,7 @@ type TaskGridProps = {
   onMoveUp: (taskId: string) => void;
   onMoveDown: (taskId: string) => void;
   onAddBelow: (taskId: string) => void;
+  onCommitNotes: (taskId: string, notes: string) => void;
   onDelete: (taskId: string) => void;
   onReorder: (taskId: string, targetIndex: number) => void;
 };
@@ -64,6 +66,7 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
     onCommitProgress,
     onCommitStartDate,
     onAddBelow,
+    onCommitNotes,
     onDelete,
     onIndent,
     onMoveDown,
@@ -277,14 +280,16 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                 <td className="px-3" style={cellStyle}>
                   {task.isSummary ? (
                     <div className="rounded-md px-2.5 py-2 text-sm font-semibold text-[var(--foreground)]">
-                      {task.durationDays}
+                      auto
                     </div>
+                  ) : task.computedKind === "milestone" ? (
+                    <div className="rounded-md px-2.5 py-2 text-sm text-[var(--muted)]">—</div>
                   ) : (
                     <input
                       className="w-full rounded-md border border-transparent bg-transparent px-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:bg-white"
                       defaultValue={task.durationDays}
                       style={{ height: controlHeight }}
-                      min={task.computedKind === "milestone" ? 0 : 1}
+                      min={1}
                       onBlur={(event) => {
                         onCommitDuration(task.id, Number(event.target.value || 1));
                       }}
@@ -394,6 +399,12 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                     >
                       <Plus className="h-4 w-4" />
                     </button>
+                    <NotesPopover
+                      taskId={task.id}
+                      taskName={task.name}
+                      notes={task.notes}
+                      onCommit={onCommitNotes}
+                    />
                     <button
                       aria-label="Excluir tarefa"
                       className="rounded-md border border-[var(--border)] p-1.5 text-[var(--muted)] transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
