@@ -8,6 +8,7 @@ export const DEFAULT_GANTT_APPEARANCE: GanttAppearanceSettings = {
   dependencyColor: "rgba(26, 31, 28, 0.48)",
   labelColor: "#243028",
   showDependencies: true,
+  showCriticalPath: false,
   showTodayHighlight: true,
   labelPosition: "inside",
   labelContent: "code-name",

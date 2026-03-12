@@ -217,7 +217,9 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                             onKeyDown={commitOnEnter}
                           />
                           {isTaskOverdue(task) && (
-                            <CircleAlert className="ml-1 inline h-3 w-3 flex-shrink-0 text-rose-500" title="Tarefa atrasada" />
+                            <span className="ml-1 inline-flex" title="Tarefa atrasada">
+                              <CircleAlert className="inline h-3 w-3 flex-shrink-0 text-rose-500" />
+                            </span>
                           )}
                         </div>
                       </div>

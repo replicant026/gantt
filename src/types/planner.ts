@@ -23,6 +23,7 @@ export interface GanttAppearanceSettings {
   dependencyColor: string;
   labelColor: string;
   showDependencies: boolean;
+  showCriticalPath: boolean;
   showTodayHighlight: boolean;
   labelPosition: GanttLabelPosition;
   labelContent: GanttLabelContent;
@@ -118,6 +119,7 @@ export interface ResolvedTask extends TaskRecord {
   depth: number;
   wbs: string;
   isSummary: boolean;
+  isCritical: boolean;
   predecessorLinks: ResolvedDependencyLink[];
   successorLinks: ResolvedDependencyLink[];
   predecessorIds: string[];

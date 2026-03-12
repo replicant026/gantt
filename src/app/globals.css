@@ -104,6 +104,11 @@ textarea {
   stroke-width: 2px !important;
 }
 
+.gantt .bar.is-critical {
+  stroke: #b91c1c !important;
+  stroke-width: 2px !important;
+}
+
 .gantt .arrow {
   stroke: var(--gantt-dependency-color) !important;
 }

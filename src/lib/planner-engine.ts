@@ -364,6 +364,10 @@ export function resolvePlannerProject(
     });
   }
 
+  const criticalIds = cycles.length === 0
+    ? computeCriticalPath(tasks, bundle.dependencies)
+    : new Set<string>();
+
   const { incoming, outgoing } = createDependencyMaps(bundle.dependencies);
   const resolvedMap = new Map<string, ResolvedTask>();
   const normalizedMap = new Map<string, TaskRecord>();
@@ -466,6 +470,7 @@ export function resolvePlannerProject(
       depth: 0,
       wbs: "",
       isSummary: hasChildren,
+      isCritical: criticalIds.has(task.id),
       predecessorLinks: [],
       successorLinks: [],
       predecessorIds: incomingDependencies.map((dependency) => dependency.predecessorId),
@@ -672,6 +677,70 @@ export function isTaskOverdue(task: Pick<ResolvedTask, "endDate" | "status" | "c
   if (task.status === "done" || task.computedKind !== "task") return false;
   const today = new Date().toISOString().slice(0, 10);
   return task.endDate < today;
+}
+
+export function computeCriticalPath(
+  tasks: TaskRecord[],
+  dependencies: DependencyRecord[],
+): Set<string> {
+  if (dependencies.length === 0) return new Set();
+
+  const duration = new Map(tasks.map((t) => [t.id, Math.max(t.durationDays || 1, 1)]));
+  const successors = new Map<string, string[]>();
+  const predecessors = new Map<string, string[]>();
+
+  for (const dep of dependencies) {
+    const s = successors.get(dep.predecessorId) ?? [];
+    s.push(dep.successorId);
+    successors.set(dep.predecessorId, s);
+    const p = predecessors.get(dep.successorId) ?? [];
+    p.push(dep.predecessorId);
+    predecessors.set(dep.successorId, p);
+  }
+
+  // Forward pass: Early Finish
+  const ef = new Map<string, number>();
+  function getEF(id: string): number {
+    if (ef.has(id)) return ef.get(id)!;
+    const preds = predecessors.get(id) ?? [];
+    const es = preds.length > 0 ? Math.max(...preds.map(getEF)) : 0;
+    const val = es + (duration.get(id) ?? 1);
+    ef.set(id, val);
+    return val;
+  }
+  for (const t of tasks) getEF(t.id);
+
+  const maxEF = ef.size > 0 ? Math.max(...ef.values()) : 0;
+
+  // Backward pass: Late Finish
+  const lf = new Map<string, number>();
+  function getLF(id: string): number {
+    if (lf.has(id)) return lf.get(id)!;
+    const succs = successors.get(id) ?? [];
+    const val = succs.length > 0
+      ? Math.min(...succs.map((s) => getLF(s) - (duration.get(s) ?? 1)))
+      : maxEF;
+    lf.set(id, val);
+    return val;
+  }
+  const taskIds = tasks.map((t) => t.id);
+  for (const id of [...taskIds].reverse()) getLF(id);
+
+  // Critical: slack = 0 AND is part of a dependency
+  const inDeps = new Set<string>();
+  for (const dep of dependencies) {
+    inDeps.add(dep.predecessorId);
+    inDeps.add(dep.successorId);
+  }
+
+  const critical = new Set<string>();
+  for (const id of taskIds) {
+    const slack = (lf.get(id) ?? 0) - (ef.get(id) ?? 0);
+    if (slack === 0 && inDeps.has(id)) {
+      critical.add(id);
+    }
+  }
+  return critical;
 }
 
 export function calculatePlannerStats(

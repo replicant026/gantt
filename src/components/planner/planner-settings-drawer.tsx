@@ -163,6 +163,15 @@ export function PlannerSettingsDrawer({
             </label>
             <label className="flex items-center gap-3 rounded-md border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[var(--foreground)]">
               <input
+                checked={settings.showCriticalPath}
+                className="accent-[var(--accent)]"
+                onChange={(event) => onChange("showCriticalPath", event.target.checked)}
+                type="checkbox"
+              />
+              Mostrar caminho crítico
+            </label>
+            <label className="flex items-center gap-3 rounded-md border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[var(--foreground)]">
+              <input
                 checked={settings.showTodayHighlight}
                 className="accent-[var(--accent)]"
                 onChange={(event) => onChange("showTodayHighlight", event.target.checked)}

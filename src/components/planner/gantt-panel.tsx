@@ -35,6 +35,7 @@ type GanttPanelProps = {
   viewMode: ChartViewMode;
   selectedTaskId: string | null;
   appearance: GanttAppearanceSettings;
+  criticalIds: Set<string>;
   onSelectTask: (taskId: string) => void;
   onDateChange: (taskId: string, startDate: string, endDate: string) => void;
   onViewModeChange: (viewMode: ChartViewMode) => void;
@@ -134,6 +135,27 @@ function applyLabelPositions(
   }
 }
 
+function applyCriticalPath(
+  root: HTMLElement | null,
+  criticalIds: Set<string>,
+  enabled: boolean,
+) {
+  if (!root) {
+    return;
+  }
+
+  for (const wrapper of root.querySelectorAll<SVGGElement>(".bar-wrapper")) {
+    const taskId = wrapper.getAttribute("data-id") ?? "";
+    const bar = wrapper.querySelector<SVGRectElement>(".bar");
+    if (!bar) {
+      continue;
+    }
+
+    const isCritical = enabled && criticalIds.has(taskId);
+    bar.classList.toggle("is-critical", isCritical);
+  }
+}
+
 export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
   function GanttPanel(
     {
@@ -142,6 +164,7 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
       viewMode,
       selectedTaskId,
       appearance,
+      criticalIds,
       onSelectTask,
       onDateChange,
       onViewModeChange,
@@ -161,6 +184,7 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
       dependencyColor,
       labelColor,
       showDependencies,
+      showCriticalPath,
       showTodayHighlight,
       labelPosition,
       fontFamily,
@@ -303,13 +327,14 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
         requestAnimationFrame(() => {
           stripSvgAnimations(chartRef.current);
           applyLabelPositions(chartRef.current, appearance);
+          applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
         });
       })();
 
       return () => {
         cancelled = true;
       };
-    }, [appearance, barHeight, mappedTasks, rowPadding, viewMode]);
+    }, [appearance, barHeight, criticalIds, mappedTasks, rowPadding, showCriticalPath, viewMode]);
 
     useEffect(() => {
       if (!instanceRef.current || !chartRef.current) {
@@ -330,8 +355,9 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
         }
         stripSvgAnimations(chartRef.current);
         applyLabelPositions(chartRef.current, appearance);
+        applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
       });
-    }, [appearance, labelPosition, mappedTasks]);
+    }, [appearance, criticalIds, labelPosition, mappedTasks, showCriticalPath]);
 
     useEffect(() => {
       if (!instanceRef.current || !chartRef.current) {
@@ -346,8 +372,9 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
       requestAnimationFrame(() => {
         stripSvgAnimations(chartRef.current);
         applyLabelPositions(chartRef.current, appearance);
+        applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
       });
-    }, [appearance, barHeight, rowPadding]);
+    }, [appearance, barHeight, criticalIds, rowPadding, showCriticalPath]);
 
     useEffect(() => {
       if (!instanceRef.current) {
@@ -359,15 +386,17 @@ export const GanttPanel = forwardRef<GanttPanelHandle, GanttPanelProps>(
       requestAnimationFrame(() => {
         stripSvgAnimations(chartRef.current);
         applyLabelPositions(chartRef.current, appearance);
+        applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
       });
-    }, [appearance, viewMode]);
+    }, [appearance, criticalIds, showCriticalPath, viewMode]);
 
     useEffect(() => {
       requestAnimationFrame(() => {
         stripSvgAnimations(chartRef.current);
         applyLabelPositions(chartRef.current, appearance);
+        applyCriticalPath(chartRef.current, criticalIds, showCriticalPath);
       });
-    }, [appearance, labelPosition]);
+    }, [appearance, criticalIds, labelPosition, showCriticalPath]);
 
     useEffect(() => {
       if (!chartRef.current) {

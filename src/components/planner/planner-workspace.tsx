@@ -56,6 +56,7 @@ import {
   exportProjectJson,
   exportProjectXlsx,
 } from "@/lib/planner-export";
+import { parseCsvImport } from "@/lib/planner-import";
 import { plannerBundleSchema } from "@/lib/planner-schema";
 import type {
   DependencyRecord,
@@ -379,6 +380,7 @@ function FileMenu({
   onExportPng,
   onExportPdf,
   onImportJson,
+  onImportCsv,
 }: {
   onCreateSnapshot: () => void;
   onOpenSnapshots: () => void;
@@ -388,8 +390,10 @@ function FileMenu({
   onExportPng: () => void;
   onExportPdf: () => void;
   onImportJson: (file: File) => void;
+  onImportCsv: (file: File) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const jsonInputRef = useRef<HTMLInputElement | null>(null);
+  const csvInputRef = useRef<HTMLInputElement | null>(null);
 
   return (
     <details className="relative">
@@ -434,14 +438,35 @@ function FileMenu({
         ))}
         <button
           className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[#f4f6f2]"
-          onClick={() => inputRef.current?.click()}
+          onClick={() => csvInputRef.current?.click()}
+          type="button"
+        >
+          <Upload className="h-4 w-4" />
+          Importar CSV
+        </button>
+        <button
+          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[#f4f6f2]"
+          onClick={() => jsonInputRef.current?.click()}
           type="button"
         >
           <Upload className="h-4 w-4" />
           Importar JSON
         </button>
         <input
-          ref={inputRef}
+          ref={csvInputRef}
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              onImportCsv(file);
+            }
+            event.currentTarget.value = "";
+          }}
+          type="file"
+        />
+        <input
+          ref={jsonInputRef}
           accept="application/json"
           className="hidden"
           onChange={(event) => {
@@ -708,6 +733,16 @@ export function PlannerWorkspace() {
   const visibleTasks = useMemo(() => {
     return getVisibleTasks(resolvedProject?.resolvedTasks ?? []);
   }, [resolvedProject]);
+
+  const criticalIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of visibleTasks) {
+      if (task.isCritical) {
+        ids.add(task.id);
+      }
+    }
+    return ids;
+  }, [visibleTasks]);
 
   const handleGanttVerticalScroll = useCallback((scrollTop: number) => {
     if (scrollSyncLock.current) return;
@@ -1200,6 +1235,41 @@ export function PlannerWorkspace() {
     }
   }
 
+  async function handleImportCsv(file: File) {
+    if (!resolvedProject) {
+      return;
+    }
+
+    const text = await file.text();
+    const { tasks, error } = parseCsvImport(text);
+
+    if (error) {
+      pushNotice("error", error);
+      return;
+    }
+
+    const orderedExisting = sortTasksByOrder(resolvedProject.tasks);
+    const baseCode = orderedExisting.reduce((max, task) => Math.max(max, task.code), 0);
+    const baseOrder = orderedExisting.length * 10;
+
+    const newTasks: TaskRecord[] = tasks.map((task, index) => ({
+      ...task,
+      id: crypto.randomUUID(),
+      projectId: resolvedProject.project.id,
+      code: baseCode + index + 1,
+      parentId: null,
+      order: baseOrder + (index + 1) * 10,
+    }));
+
+    if (newTasks.length === 0) {
+      pushNotice("info", "Nenhuma linha válida encontrada no CSV.");
+      return;
+    }
+
+    await persistGraph([...orderedExisting, ...newTasks], resolvedProject.dependencies);
+    pushNotice("success", `${newTasks.length} tarefa(s) importada(s) do CSV.`);
+  }
+
   async function handleCreateSnapshot() {
     if (!resolvedProject) {
       return;
@@ -1366,6 +1436,9 @@ export function PlannerWorkspace() {
               onExportXlsx={() => exportProjectXlsx(resolvedProject.project, resolvedProject.resolvedTasks)}
               onImportJson={(file) => {
                 void handleImportJson(file);
+              }}
+              onImportCsv={(file) => {
+                void handleImportCsv(file);
               }}
               onOpenSnapshots={() => setIsSnapshotsOpen(true)}
             />
@@ -1550,6 +1623,7 @@ export function PlannerWorkspace() {
             <section className="min-h-0 bg-white">
               <GanttPanel
                 appearance={appearance}
+                criticalIds={criticalIds}
                 onDateChange={(taskId, startDate, endDate) => {
                   const targetTask = resolvedProject.tasks.find((task) => task.id === taskId);
                   const resolvedTask = resolvedProject.resolvedTasks.find(

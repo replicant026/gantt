@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildDuplicateSubtree,
+  computeCriticalPath,
   collectSubtreeIds,
   formatDependencyLinks,
   isTaskOverdue,
@@ -356,5 +357,62 @@ describe("isTaskOverdue", () => {
     future.setFullYear(future.getFullYear() + 1);
     const iso = future.toISOString().slice(0, 10);
     expect(isTaskOverdue({ endDate: iso, status: "pending", computedKind: "task" })).toBe(false);
+  });
+});
+
+describe("computeCriticalPath", () => {
+  it("identifica a sequência mais longa como crítica", () => {
+    const tasks = [
+      createTask({
+        id: "A",
+        code: 1,
+        order: 10,
+        name: "A",
+        startDate: "2026-03-01",
+        endDate: "2026-03-05",
+        durationDays: 5,
+      }),
+      createTask({
+        id: "B",
+        code: 2,
+        order: 20,
+        name: "B",
+        startDate: "2026-03-06",
+        endDate: "2026-03-10",
+        durationDays: 5,
+      }),
+      createTask({
+        id: "C",
+        code: 3,
+        order: 30,
+        name: "C",
+        startDate: "2026-03-01",
+        endDate: "2026-03-03",
+        durationDays: 3,
+      }),
+    ];
+    const deps: DependencyRecord[] = [
+      {
+        id: "d1",
+        projectId: "project-1",
+        predecessorId: "A",
+        successorId: "B",
+        type: "FS",
+        lagDays: 0,
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+    ];
+
+    const critical = computeCriticalPath(tasks, deps);
+    expect(critical.has("A")).toBe(true);
+    expect(critical.has("B")).toBe(true);
+    expect(critical.has("C")).toBe(false);
+  });
+
+  it("retorna conjunto vazio sem dependências", () => {
+    const tasks = [createTask({ id: "A", code: 1, order: 10, name: "A" })];
+    const critical = computeCriticalPath(tasks, []);
+    expect(critical.size).toBe(0);
   });
 });
