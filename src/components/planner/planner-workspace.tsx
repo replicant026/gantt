@@ -73,6 +73,8 @@ import { UndoManager } from "@/lib/undo-manager";
 import { PlannerSettingsDrawer } from "./planner-settings-drawer";
 import { TaskGrid } from "./task-grid";
 import { ConfirmDialog } from "./confirm-dialog";
+import { DEFAULT_COLUMNS, loadColumnConfig, saveColumnConfig, type ColumnDef } from "@/lib/column-config";
+import { ColumnManager } from "./column-manager";
 
 type NoticeTone = "success" | "error" | "info";
 type WorkspaceView = "split" | "tasks" | "gantt";
@@ -593,6 +595,7 @@ export function PlannerWorkspace() {
   const scrollSyncLock = useRef(false);
   const [undoManagerRef] = useState(() => new UndoManager());
   const [deleteConfirm, setDeleteConfirm] = useState<{ taskId: string; taskName: string } | null>(null);
+  const [columns, setColumns] = useState<ColumnDef[]>(() => [...DEFAULT_COLUMNS]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -660,6 +663,12 @@ export function PlannerWorkspace() {
 
     return () => window.cancelAnimationFrame(frame);
   }, [activeProjectId, projects]);
+
+  useEffect(() => {
+    if (activeProjectId) {
+      setColumns(loadColumnConfig(activeProjectId));
+    }
+  }, [activeProjectId]);
 
   useEffect(() => {
     if (activeProjectId) {
@@ -742,6 +751,11 @@ export function PlannerWorkspace() {
 
   function resetAppearance() {
     setAppearance(DEFAULT_GANTT_APPEARANCE);
+  }
+
+  function handleColumnsChange(nextColumns: ColumnDef[]) {
+    setColumns(nextColumns);
+    if (activeProjectId) saveColumnConfig(activeProjectId, nextColumns);
   }
 
   function startResizeTaskPane(event: React.PointerEvent<HTMLButtonElement>) {
@@ -1377,9 +1391,12 @@ export function PlannerWorkspace() {
                       Nome, datas, duração, dependências, progresso e estrutura.
                     </p>
                   </div>
-                  <span className="mono text-xs font-semibold text-[var(--muted-soft)]">
-                    {visibleTasks.length} linhas
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="mono text-xs font-semibold text-[var(--muted-soft)]">
+                      {visibleTasks.length} linhas
+                    </span>
+                    <ColumnManager columns={columns} onChange={handleColumnsChange} />
+                  </div>
                 </div>
                 <TaskGrid
                   ref={taskGridRef}
@@ -1458,6 +1475,7 @@ export function PlannerWorkspace() {
                   }}
                   selectedTaskId={resolvedProject.view?.selectedTaskId ?? null}
                   tasks={visibleTasks}
+                  columns={columns}
                 />
               </div>
             </section>
