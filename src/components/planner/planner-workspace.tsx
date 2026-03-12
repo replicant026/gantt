@@ -786,7 +786,8 @@ export function PlannerWorkspace() {
 
     event.preventDefault();
     const pointerId = event.pointerId;
-    event.currentTarget.setPointerCapture(pointerId);
+    const resizeButton = event.currentTarget;
+    resizeButton.setPointerCapture(pointerId);
 
     const move = (moveEvent: PointerEvent) => {
       const container = splitContainerRef.current;
@@ -809,7 +810,7 @@ export function PlannerWorkspace() {
     const stop = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
-      event.currentTarget.releasePointerCapture(pointerId);
+      resizeButton.releasePointerCapture(pointerId);
     };
 
     window.addEventListener("pointermove", move);
