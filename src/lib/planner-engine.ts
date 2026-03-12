@@ -531,6 +531,49 @@ export function resolvePlannerProject(
   };
 }
 
+export function collectSubtreeIds(taskId: string, tasks: TaskRecord[]): Set<string> {
+  const ids = new Set<string>([taskId]);
+  const stack = [taskId];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const task of tasks) {
+      if (task.parentId === current && !ids.has(task.id)) {
+        ids.add(task.id);
+        stack.push(task.id);
+      }
+    }
+  }
+  return ids;
+}
+
+export function buildDuplicateSubtree(
+  rootId: string,
+  allTasks: TaskRecord[],
+  projectId: string,
+  nextCode: number,
+): TaskRecord[] {
+  const timestamp = new Date().toISOString();
+  const idMap = new Map<string, string>();
+
+  const subtreeIds = collectSubtreeIds(rootId, allTasks);
+  const subtree = allTasks.filter((t) => subtreeIds.has(t.id));
+
+  for (const task of subtree) {
+    idMap.set(task.id, crypto.randomUUID());
+  }
+
+  return subtree.map((task, i) => ({
+    ...task,
+    id: idMap.get(task.id)!,
+    projectId,
+    parentId: task.parentId ? (idMap.get(task.parentId) ?? null) : null,
+    code: nextCode + i,
+    name: task.id === rootId ? `${task.name} (cópia)` : task.name,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }));
+}
+
 export function parsePredecessorInput(value: string): number[] {
   return parseDependencyInput(value).map((token) => token.code);
 }

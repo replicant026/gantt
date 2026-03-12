@@ -41,9 +41,11 @@ import {
   saveProjectView,
 } from "@/lib/planner-db";
 import {
+  buildDuplicateSubtree,
   buildTaskPatchFromDates,
   buildTaskPatchFromDuration,
   buildTaskPatchFromEndDate,
+  collectSubtreeIds,
   parseDependencyInput,
   resolvePlannerProject,
 } from "@/lib/planner-engine";
@@ -96,23 +98,6 @@ function withResequencedOrders(tasks: TaskRecord[]): TaskRecord[] {
     ...task,
     order: (index + 1) * 10,
   }));
-}
-
-function collectSubtreeIds(taskId: string, tasks: TaskRecord[]): Set<string> {
-  const ids = new Set<string>([taskId]);
-  const stack = [taskId];
-
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    for (const task of tasks) {
-      if (task.parentId === current && !ids.has(task.id)) {
-        ids.add(task.id);
-        stack.push(task.id);
-      }
-    }
-  }
-
-  return ids;
 }
 
 function getSubtreeRange(tasks: TaskRecord[], taskId: string) {
@@ -596,6 +581,7 @@ export function PlannerWorkspace() {
   const [undoManagerRef] = useState(() => new UndoManager());
   const [deleteConfirm, setDeleteConfirm] = useState<{ taskId: string; taskName: string } | null>(null);
   const [columns, setColumns] = useState<ColumnDef[]>(() => [...DEFAULT_COLUMNS]);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -985,6 +971,48 @@ export function PlannerWorkspace() {
       view: buildProjectView(resolvedProject, { selectedTaskId: nextSelectedTask }),
     });
     pushNotice("info", "Tarefa e subtarefas removidas do cronograma.");
+  }
+
+  function handleToggleSelect(taskId: string, multi: boolean) {
+    setSelectedTaskIds((prev) => {
+      if (!multi) return new Set([taskId]);
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  }
+
+  async function handleDuplicateTask(taskId: string) {
+    if (!resolvedProject) return;
+    const orderedTasks = sortTasksByOrder(resolvedProject.tasks);
+    const nextCode = orderedTasks.reduce((max, t) => Math.max(max, t.code), 0) + 1;
+    const copies = buildDuplicateSubtree(taskId, orderedTasks, resolvedProject.project.id, nextCode);
+    // Inserir as cópias após o último elemento do subtree original
+    const subtreeIds = collectSubtreeIds(taskId, orderedTasks);
+    const lastSubtreeIndex = orderedTasks.reduce((last, t, i) => subtreeIds.has(t.id) ? i : last, -1);
+    const before = orderedTasks.slice(0, lastSubtreeIndex + 1);
+    const after = orderedTasks.slice(lastSubtreeIndex + 1);
+    await persistGraph([...before, ...copies, ...after], resolvedProject.dependencies);
+  }
+
+  async function handleBatchDelete(taskIds: string[]) {
+    if (!resolvedProject) return;
+    const allToDelete = new Set<string>();
+    for (const taskId of taskIds) {
+      for (const id of collectSubtreeIds(taskId, resolvedProject.tasks)) {
+        allToDelete.add(id);
+      }
+    }
+    const nextTasks = resolvedProject.tasks.filter((t) => !allToDelete.has(t.id));
+    const nextDeps = resolvedProject.dependencies.filter(
+      (d) => !allToDelete.has(d.predecessorId) && !allToDelete.has(d.successorId)
+    );
+    await persistGraph(nextTasks, nextDeps);
+    setSelectedTaskIds(new Set());
   }
 
   async function handleToggleCollapse(taskId: string) {
@@ -1398,6 +1426,26 @@ export function PlannerWorkspace() {
                     <ColumnManager columns={columns} onChange={handleColumnsChange} />
                   </div>
                 </div>
+                {selectedTaskIds.size > 1 && (
+                  <div className="flex items-center gap-3 border-b border-[var(--border)] bg-white px-4 py-2 text-sm">
+                    <span className="text-[var(--muted)]">{selectedTaskIds.size} selecionadas</span>
+                    <button
+                      className="flex items-center gap-1 rounded-md bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700"
+                      onClick={() => setDeleteConfirm({ taskId: "__batch__", taskName: `${selectedTaskIds.size} tarefas` })}
+                      type="button"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Excluir selecionadas
+                    </button>
+                    <button
+                      className="text-xs text-[var(--muted)] hover:underline"
+                      onClick={() => setSelectedTaskIds(new Set())}
+                      type="button"
+                    >
+                      Limpar seleção
+                    </button>
+                  </div>
+                )}
                 <TaskGrid
                   ref={taskGridRef}
                   headerOffset={taskHeaderOffset}
@@ -1476,6 +1524,10 @@ export function PlannerWorkspace() {
                   selectedTaskId={resolvedProject.view?.selectedTaskId ?? null}
                   tasks={visibleTasks}
                   columns={columns}
+                  selectedTaskIds={selectedTaskIds}
+                  onToggleSelect={handleToggleSelect}
+                  onAddAtEnd={() => { void handleAddTask(); }}
+                  onDuplicate={(taskId) => { void handleDuplicateTask(taskId); }}
                 />
               </div>
             </section>
@@ -1558,10 +1610,12 @@ export function PlannerWorkspace() {
         confirmLabel="Excluir"
         destructive
         onConfirm={() => {
-          if (deleteConfirm) {
+          if (deleteConfirm?.taskId === "__batch__") {
+            void handleBatchDelete([...selectedTaskIds]);
+          } else if (deleteConfirm) {
             void handleDeleteTask(deleteConfirm.taskId);
-            setDeleteConfirm(null);
           }
+          setDeleteConfirm(null);
         }}
         onCancel={() => setDeleteConfirm(null)}
       />

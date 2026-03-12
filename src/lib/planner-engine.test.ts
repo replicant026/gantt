@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDuplicateSubtree,
+  collectSubtreeIds,
   formatDependencyLinks,
   isTaskOverdue,
   parseDependencyInput,
@@ -293,6 +295,50 @@ describe("resolvePlannerProject", () => {
 
 it("MAX_SNAPSHOTS é 20", () => {
   expect(MAX_SNAPSHOTS).toBe(20);
+});
+
+describe("collectSubtreeIds", () => {
+  it("retorna apenas o próprio id sem filhos", () => {
+    const tasks = [createTask({ id: "a", code: 1, order: 10, name: "A" })];
+    const ids = collectSubtreeIds("a", tasks);
+    expect(ids.size).toBe(1);
+    expect(ids.has("a")).toBe(true);
+  });
+
+  it("inclui filhos e netos recursivamente", () => {
+    const tasks = [
+      createTask({ id: "p", code: 1, order: 10, name: "Pai" }),
+      createTask({ id: "c", code: 2, order: 20, name: "Filho", parentId: "p" }),
+      createTask({ id: "g", code: 3, order: 30, name: "Neto", parentId: "c" }),
+    ];
+    const ids = collectSubtreeIds("p", tasks);
+    expect(ids.size).toBe(3);
+  });
+});
+
+describe("buildDuplicateSubtree", () => {
+  it("cria cópias com novos IDs mantendo hierarquia", () => {
+    const tasks = [
+      createTask({ id: "p", code: 1, order: 10, name: "Pai" }),
+      createTask({ id: "c", code: 2, order: 20, name: "Filho", parentId: "p" }),
+    ];
+    const result = buildDuplicateSubtree("p", tasks, "project-1", 10);
+    expect(result.length).toBe(2);
+    const newParent = result.find((t) => t.name === "Pai (cópia)")!;
+    const newChild = result.find((t) => t.name === "Filho")!;
+    expect(newParent).toBeDefined();
+    expect(newChild.parentId).toBe(newParent.id);
+    expect(newParent.id).not.toBe("p");
+    expect(newChild.id).not.toBe("c");
+  });
+
+  it("tarefa sem filhos gera apenas uma cópia", () => {
+    const tasks = [createTask({ id: "a", code: 1, order: 10, name: "Solo" })];
+    const result = buildDuplicateSubtree("a", tasks, "project-1", 5);
+    expect(result.length).toBe(1);
+    expect(result[0].name).toBe("Solo (cópia)");
+    expect(result[0].code).toBe(5);
+  });
 });
 
 describe("isTaskOverdue", () => {

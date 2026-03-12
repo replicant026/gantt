@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Copy,
   CornerDownRight,
   CornerUpLeft,
   GripVertical,
@@ -60,6 +61,10 @@ type TaskGridProps = {
   onCommitStatus: (taskId: string, status: TaskStatus) => void;
   onCommitPriority: (taskId: string, priority: TaskPriority) => void;
   onCommitAssignee: (taskId: string, assignee: string) => void;
+  onAddAtEnd: () => void;
+  onDuplicate: (taskId: string) => void;
+  selectedTaskIds: Set<string>;
+  onToggleSelect: (taskId: string, multi: boolean) => void;
 };
 
 function commitOnEnter(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
@@ -98,6 +103,10 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
     onCommitStatus,
     onCommitPriority,
     onCommitAssignee,
+    onAddAtEnd,
+    onDuplicate,
+    selectedTaskIds,
+    onToggleSelect,
   }, ref) {
   const draggedIdRef = useRef<string | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -140,13 +149,16 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
           {tasks.map((task, index) => {
             const selected = task.id === selectedTaskId;
             const overdue = isTaskOverdue(task);
+            const multiSelected = selectedTaskIds.has(task.id) && selectedTaskIds.size > 1;
             const rowTone = task.isSummary
               ? "bg-[#f4f8f4]"
-              : selected
-                ? "bg-[var(--accent-soft)]/70"
-                : overdue
-                  ? "bg-rose-50"
-                  : "bg-white";
+              : multiSelected
+                ? "bg-[var(--accent-soft)]"
+                : selected
+                  ? "bg-[var(--accent-soft)]/70"
+                  : overdue
+                    ? "bg-rose-50"
+                    : "bg-white";
             const predecessors = formatDependencyLinks(task.predecessorLinks);
             const successors = formatDependencyLinks(task.successorLinks);
 
@@ -466,6 +478,18 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
                         >
                           <Plus className="h-4 w-4" />
                         </button>
+                        <button
+                          aria-label="Duplicar tarefa"
+                          className="rounded-md border border-[var(--border)] p-1.5 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-[#f4f6f2]"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onDuplicate(task.id);
+                          }}
+                          title="Duplicar tarefa"
+                          type="button"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
                         <NotesPopover
                           taskId={task.id}
                           taskName={task.name}
@@ -496,7 +520,12 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
               <tr
                 key={`${task.id}-${task.updatedAt}`}
                 className={`border-b border-[var(--border)] align-middle transition hover:bg-[var(--accent-soft)]/35 ${rowTone} ${dragOverIndex === index ? "ring-2 ring-inset ring-[var(--accent)]" : ""}`}
-                onClick={() => onSelectTask(task.id)}
+                onClick={(e) => {
+                  onToggleSelect(task.id, e.ctrlKey || e.metaKey);
+                  if (!e.ctrlKey && !e.metaKey) {
+                    onSelectTask(task.id);
+                  }
+                }}
                 style={{ height: rowHeight, maxHeight: rowHeight, overflow: "hidden" }}
                 draggable
                 onDragStart={(e) => {
@@ -532,6 +561,22 @@ export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
               </tr>
             );
           })}
+          <tr
+            className="cursor-pointer border-b border-[var(--border)] bg-white transition hover:bg-[var(--accent-soft)]/20"
+            style={{ height: rowHeight }}
+            onClick={onAddAtEnd}
+            title="Clique para adicionar nova tarefa"
+          >
+            <td
+              colSpan={columns.filter((c) => c.visible).length}
+              className="px-4 align-middle"
+            >
+              <div className="flex items-center gap-2 text-sm text-[var(--muted-soft)]">
+                <Plus className="h-3.5 w-3.5" />
+                <span>Adicionar tarefa...</span>
+              </div>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
