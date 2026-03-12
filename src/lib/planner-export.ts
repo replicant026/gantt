@@ -73,10 +73,12 @@ export async function exportGanttPng(
     cacheBust: true,
     pixelRatio: 2,
     backgroundColor: "#f4f5ef",
+    skipFonts: true,
   });
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
-  downloadBlob(blob, `${createFileSlug(project)}-gantt.png`);
+  const anchor = document.createElement("a");
+  anchor.href = dataUrl;
+  anchor.download = `${createFileSlug(project)}-gantt.png`;
+  anchor.click();
 }
 
 export async function exportGanttPdf(
@@ -87,8 +89,14 @@ export async function exportGanttPdf(
     cacheBust: true,
     pixelRatio: 2,
     backgroundColor: "#f4f5ef",
+    skipFonts: true,
   });
-  const pngBytes = await fetch(dataUrl).then((response) => response.arrayBuffer());
+  const base64 = dataUrl.split(",")[1];
+  const binary = atob(base64);
+  const pngBytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    pngBytes[i] = binary.charCodeAt(i);
+  }
   const pdf = await PDFDocument.create();
   const image = await pdf.embedPng(pngBytes);
   const page = pdf.addPage([image.width + 48, image.height + 48]);
@@ -99,9 +107,8 @@ export async function exportGanttPdf(
     height: image.height,
   });
   const pdfBytes = await pdf.save();
-  const pdfByteArray = Uint8Array.from(pdfBytes);
   downloadBlob(
-    new Blob([pdfByteArray], { type: "application/pdf" }),
+    new Blob([pdfBytes], { type: "application/pdf" }),
     `${createFileSlug(project)}-gantt.pdf`,
   );
 }

@@ -1437,15 +1437,23 @@ export function PlannerWorkspace() {
               }
               onExportPdf={() => {
                 const el = ganttExportRef.current?.exportElement;
-                if (el) {
-                  void exportGanttPdf(el, resolvedProject.project);
+                if (!el) {
+                  pushNotice("error", "O painel Gantt precisa estar visível para exportar em PDF.");
+                  return;
                 }
+                exportGanttPdf(el, resolvedProject.project).catch(() => {
+                  pushNotice("error", "Não foi possível exportar o Gantt como PDF.");
+                });
               }}
               onExportPng={() => {
                 const el = ganttExportRef.current?.exportElement;
-                if (el) {
-                  void exportGanttPng(el, resolvedProject.project);
+                if (!el) {
+                  pushNotice("error", "O painel Gantt precisa estar visível para exportar em PNG.");
+                  return;
                 }
+                exportGanttPng(el, resolvedProject.project).catch(() => {
+                  pushNotice("error", "Não foi possível exportar o Gantt como PNG.");
+                });
               }}
               onExportXlsx={() => exportProjectXlsx(resolvedProject.project, resolvedProject.resolvedTasks)}
               onImportJson={(file) => {
