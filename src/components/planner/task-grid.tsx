@@ -1,5 +1,7 @@
 "use client";
 
+import { forwardRef, useRef, useState } from "react";
+
 import {
   ArrowDown,
   ArrowUp,
@@ -7,6 +9,7 @@ import {
   ChevronRight,
   CornerDownRight,
   CornerUpLeft,
+  GripVertical,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -17,6 +20,8 @@ import type { ResolvedTask, TaskKind } from "@/types/planner";
 type TaskGridProps = {
   tasks: ResolvedTask[];
   selectedTaskId: string | null;
+  rowHeight: number;
+  headerOffset: number;
   onSelectTask: (taskId: string) => void;
   onCommitName: (taskId: string, name: string) => void;
   onCommitStartDate: (taskId: string, startDate: string) => void;
@@ -32,6 +37,7 @@ type TaskGridProps = {
   onMoveDown: (taskId: string) => void;
   onAddBelow: (taskId: string) => void;
   onDelete: (taskId: string) => void;
+  onReorder: (taskId: string, targetIndex: number) => void;
 };
 
 function commitOnEnter(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
@@ -43,44 +49,77 @@ function commitOnEnter(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAre
   }
 }
 
-export function TaskGrid({
-  tasks,
-  selectedTaskId,
-  onSelectTask,
-  onCommitDuration,
-  onCommitEndDate,
-  onCommitKind,
-  onCommitName,
-  onCommitPredecessors,
-  onCommitProgress,
-  onCommitStartDate,
-  onAddBelow,
-  onDelete,
-  onIndent,
-  onMoveDown,
-  onMoveUp,
-  onOutdent,
-  onToggleCollapse,
-}: TaskGridProps) {
+export const TaskGrid = forwardRef<HTMLDivElement, TaskGridProps>(
+  function TaskGrid({
+    tasks,
+    selectedTaskId,
+    rowHeight,
+    headerOffset,
+    onSelectTask,
+    onCommitDuration,
+    onCommitEndDate,
+    onCommitKind,
+    onCommitName,
+    onCommitPredecessors,
+    onCommitProgress,
+    onCommitStartDate,
+    onAddBelow,
+    onDelete,
+    onIndent,
+    onMoveDown,
+    onMoveUp,
+    onOutdent,
+    onToggleCollapse,
+    onReorder,
+  }, ref) {
+  const draggedIdRef = useRef<string | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const cellPaddingY = 3;
+  const controlHeight = Math.max(28, rowHeight - cellPaddingY * 2);
+  const cellStyle = {
+    height: rowHeight,
+    maxHeight: rowHeight,
+    paddingTop: cellPaddingY,
+    paddingBottom: cellPaddingY,
+    overflow: "hidden" as const,
+    boxSizing: "border-box" as const,
+  } satisfies React.CSSProperties;
+
   return (
-    <div className="planner-scrollbar overflow-auto rounded-[28px] border border-[var(--border)] bg-white">
-      <table className="min-w-[1180px] w-full border-collapse text-sm">
+    <div ref={ref} className="planner-scrollbar h-full overflow-auto bg-white">
+      <div
+        className="border-b border-[var(--border)] bg-[#f5f7f3]"
+        style={{ height: headerOffset }}
+      />
+      <table className="w-[1328px] border-collapse text-sm">
+        <colgroup>
+          <col style={{ width: 72 }} />
+          <col style={{ width: 320 }} />
+          <col style={{ width: 94 }} />
+          <col style={{ width: 118 }} />
+          <col style={{ width: 118 }} />
+          <col style={{ width: 92 }} />
+          <col style={{ width: 180 }} />
+          <col style={{ width: 168 }} />
+          <col style={{ width: 78 }} />
+          <col style={{ width: 188 }} />
+        </colgroup>
         <thead>
-          <tr className="border-b border-[var(--border)] bg-[var(--surface)] text-left text-[11px] uppercase tracking-[0.22em] text-[var(--muted-soft)]">
-            <th className="px-4 py-3 font-semibold">WBS</th>
-            <th className="px-4 py-3 font-semibold">Tarefa</th>
-            <th className="px-4 py-3 font-semibold">Tipo</th>
-            <th className="px-4 py-3 font-semibold">Início</th>
-            <th className="px-4 py-3 font-semibold">Fim</th>
-            <th className="px-4 py-3 font-semibold">Duração</th>
-            <th className="px-4 py-3 font-semibold">Dependências</th>
-            <th className="px-4 py-3 font-semibold">Sucessões</th>
-            <th className="px-4 py-3 font-semibold">%</th>
-            <th className="px-4 py-3 font-semibold">Ações</th>
+          <tr className="sticky top-0 z-10 border-b border-[var(--border)] bg-[#f5f7f3] text-left text-[11px] uppercase tracking-[0.16em] text-[var(--muted-soft)]">
+            <th className="w-6 py-2.5" />
+            <th className="px-3 py-2.5 font-semibold">Tarefa</th>
+            <th className="px-3 py-2.5 font-semibold">Tipo</th>
+            <th className="px-3 py-2.5 font-semibold">Início</th>
+            <th className="px-3 py-2.5 font-semibold">Fim</th>
+            <th className="px-3 py-2.5 font-semibold">Duração</th>
+            <th className="px-3 py-2.5 font-semibold">Predecessoras</th>
+            <th className="px-3 py-2.5 font-semibold">Sucessoras</th>
+            <th className="px-3 py-2.5 font-semibold">%</th>
+            <th className="px-3 py-2.5 font-semibold">Ações</th>
           </tr>
         </thead>
         <tbody>
-          {tasks.map((task) => {
+          {tasks.map((task, index) => {
             const selected = task.id === selectedTaskId;
             const rowTone = task.isSummary
               ? "bg-[#f4f8f4]"
@@ -93,21 +132,54 @@ export function TaskGrid({
             return (
               <tr
                 key={`${task.id}-${task.updatedAt}`}
-                className={`border-b border-[var(--border)] align-top transition hover:bg-[var(--accent-soft)]/40 ${rowTone}`}
+                className={`border-b border-[var(--border)] align-middle transition hover:bg-[var(--accent-soft)]/35 ${rowTone} ${dragOverIndex === index ? "ring-2 ring-inset ring-[var(--accent)]" : ""}`}
                 onClick={() => onSelectTask(task.id)}
+                style={{ height: rowHeight, maxHeight: rowHeight, overflow: "hidden" }}
+                draggable
+                onDragStart={(e) => {
+                  draggedIdRef.current = task.id;
+                  e.dataTransfer.effectAllowed = "move";
+                  if (e.currentTarget instanceof HTMLElement) {
+                    e.currentTarget.style.opacity = "0.5";
+                  }
+                }}
+                onDragEnd={(e) => {
+                  draggedIdRef.current = null;
+                  setDragOverIndex(null);
+                  if (e.currentTarget instanceof HTMLElement) {
+                    e.currentTarget.style.opacity = "1";
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverIndex(index);
+                }}
+                onDragLeave={() => setDragOverIndex(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverIndex(null);
+                  if (draggedIdRef.current && draggedIdRef.current !== task.id) {
+                    onReorder(draggedIdRef.current, index);
+                  }
+                  draggedIdRef.current = null;
+                }}
               >
-                <td className="px-4 py-3 align-middle">
-                  <div className="mono text-xs font-semibold text-[var(--muted-soft)]">
+                <td className="w-6 cursor-grab px-1 align-middle text-[var(--muted-soft)] active:cursor-grabbing" style={cellStyle}>
+                  <GripVertical className="h-4 w-4" />
+                </td>
+                <td className="px-3 align-middle" style={cellStyle}>
+                  <div className="mono text-[11px] font-semibold text-[var(--muted-soft)]">
                     {task.wbs}
                   </div>
-                  <div className="mono mt-1 text-[11px] text-[var(--muted)]">#{task.code}</div>
+                  <div className="mono text-[11px] text-[var(--muted)]">#{task.code}</div>
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-start gap-2" style={{ paddingLeft: `${task.depth * 18}px` }}>
+                <td className="px-3" style={cellStyle}>
+                  <div className="flex items-center gap-2" style={{ paddingLeft: `${task.depth * 14}px` }}>
                     {task.isSummary ? (
                       <button
                         aria-label={task.collapsed ? "Expandir resumo" : "Recolher resumo"}
-                        className="mt-2 rounded-full p-1 text-[var(--muted)] transition hover:bg-white"
+                        className="rounded-sm p-1 text-[var(--muted)] transition hover:bg-[#eef2ec]"
                         onClick={(event) => {
                           event.stopPropagation();
                           onToggleCollapse(task.id);
@@ -122,16 +194,17 @@ export function TaskGrid({
                         )}
                       </button>
                     ) : (
-                      <div className="mt-2 h-4 w-4 rounded-full border border-[var(--border)] bg-[var(--surface)]" />
+                      <div className="h-2.5 w-2.5 rounded-full border border-[var(--border-strong)] bg-white" />
                     )}
-                    <div className="min-w-[260px] flex-1">
+                    <div className="min-w-[280px] flex-1">
                       <input
-                        className={`w-full rounded-2xl border px-3 py-2.5 text-sm font-medium text-[var(--foreground)] outline-none transition ${
+                        className={`w-full rounded-md border px-2.5 text-sm font-medium text-[var(--foreground)] outline-none transition ${
                           task.isSummary
-                            ? "border-transparent bg-white/60"
-                            : "border-[var(--border)] bg-white focus:border-[var(--accent)]"
+                            ? "border-transparent bg-transparent"
+                            : "border-transparent bg-transparent focus:border-[var(--accent)] focus:bg-white"
                         }`}
                         defaultValue={task.name}
+                        style={{ height: controlHeight }}
                         onBlur={(event) => {
                           const nextName = event.target.value.trim();
                           if (nextName.length > 0) {
@@ -140,25 +213,19 @@ export function TaskGrid({
                         }}
                         onKeyDown={commitOnEnter}
                       />
-                      <p className="mt-2 text-xs text-[var(--muted)]">
-                        {task.isSummary
-                          ? "Linha-resumo calculada a partir das subtarefas."
-                          : task.computedKind === "milestone"
-                            ? "Marco de entrega com duração zero."
-                            : "Tarefa executável com edição direta na grade."}
-                      </p>
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3" style={cellStyle}>
                   {task.isSummary ? (
-                    <div className="rounded-2xl bg-white/70 px-3 py-2 text-sm font-semibold text-[var(--accent)]">
+                    <div className="rounded-md bg-[#eef3ee] px-2.5 py-2 text-sm font-semibold text-[var(--accent)]">
                       resumo
                     </div>
                   ) : (
                     <select
-                      className="w-full rounded-2xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                      className="w-full rounded-md border border-transparent bg-transparent px-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:bg-white"
                       defaultValue={task.computedKind === "milestone" ? "milestone" : "task"}
+                      style={{ height: controlHeight }}
                       onBlur={(event) => onCommitKind(task.id, event.target.value as TaskKind)}
                       onKeyDown={commitOnEnter}
                     >
@@ -167,15 +234,16 @@ export function TaskGrid({
                     </select>
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3" style={cellStyle}>
                   {task.isSummary ? (
-                    <div className="rounded-2xl bg-white/70 px-3 py-2.5 text-sm font-semibold text-[var(--foreground)]">
+                    <div className="rounded-md px-2.5 py-2 text-sm font-semibold text-[var(--foreground)]">
                       {task.startDate}
                     </div>
                   ) : (
                     <input
-                      className="w-full rounded-2xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                      className="w-full rounded-md border border-transparent bg-transparent px-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:bg-white"
                       defaultValue={task.startDate}
+                      style={{ height: controlHeight }}
                       onBlur={(event) => {
                         if (event.target.value) {
                           onCommitStartDate(task.id, event.target.value);
@@ -186,15 +254,16 @@ export function TaskGrid({
                     />
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3" style={cellStyle}>
                   {task.isSummary ? (
-                    <div className="rounded-2xl bg-white/70 px-3 py-2.5 text-sm font-semibold text-[var(--foreground)]">
+                    <div className="rounded-md px-2.5 py-2 text-sm font-semibold text-[var(--foreground)]">
                       {task.endDate}
                     </div>
                   ) : (
                     <input
-                      className="w-full rounded-2xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                      className="w-full rounded-md border border-transparent bg-transparent px-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:bg-white"
                       defaultValue={task.endDate}
+                      style={{ height: controlHeight }}
                       onBlur={(event) => {
                         if (event.target.value) {
                           onCommitEndDate(task.id, event.target.value);
@@ -205,15 +274,16 @@ export function TaskGrid({
                     />
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3" style={cellStyle}>
                   {task.isSummary ? (
-                    <div className="rounded-2xl bg-white/70 px-3 py-2.5 text-sm font-semibold text-[var(--foreground)]">
+                    <div className="rounded-md px-2.5 py-2 text-sm font-semibold text-[var(--foreground)]">
                       {task.durationDays}
                     </div>
                   ) : (
                     <input
-                      className="w-full rounded-2xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                      className="w-full rounded-md border border-transparent bg-transparent px-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:bg-white"
                       defaultValue={task.durationDays}
+                      style={{ height: controlHeight }}
                       min={task.computedKind === "milestone" ? 0 : 1}
                       onBlur={(event) => {
                         onCommitDuration(task.id, Number(event.target.value || 1));
@@ -223,33 +293,35 @@ export function TaskGrid({
                     />
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3" style={cellStyle}>
                   {task.isSummary ? (
-                    <div className="rounded-2xl bg-white/70 px-3 py-2.5 text-sm text-[var(--muted)]">—</div>
+                    <div className="rounded-md px-2.5 py-2 text-sm text-[var(--muted)]">—</div>
                   ) : (
                     <input
-                      className="mono w-full rounded-2xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                      className="mono w-full rounded-md border border-transparent bg-transparent px-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:bg-white"
                       defaultValue={predecessors}
+                      style={{ height: controlHeight }}
                       onBlur={(event) => onCommitPredecessors(task.id, event.target.value)}
                       onKeyDown={commitOnEnter}
-                        placeholder="12, 15SS, 18FF+2d"
-                      />
-                    )}
-                  </td>
-                <td className="px-4 py-3">
-                  <div className="mono rounded-2xl bg-white/70 px-3 py-2.5 text-sm text-[var(--foreground)]">
+                      placeholder="12, 15SS, 18FF+2d"
+                    />
+                  )}
+                </td>
+                <td className="px-3" style={cellStyle}>
+                  <div className="mono rounded-md px-2.5 py-2 text-sm text-[var(--foreground)]">
                     {successors || "—"}
                   </div>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3" style={cellStyle}>
                   {task.isSummary ? (
-                    <div className="rounded-2xl bg-white/70 px-3 py-2.5 text-sm font-semibold text-[var(--foreground)]">
+                    <div className="rounded-md px-2.5 py-2 text-sm font-semibold text-[var(--foreground)]">
                       {task.progress}%
                     </div>
                   ) : (
                     <input
-                      className="w-24 rounded-2xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
+                      className="w-16 rounded-md border border-transparent bg-transparent px-2.5 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)] focus:bg-white"
                       defaultValue={task.progress}
+                      style={{ height: controlHeight }}
                       max={100}
                       min={0}
                       onBlur={(event) => {
@@ -260,11 +332,11 @@ export function TaskGrid({
                     />
                   )}
                 </td>
-                <td className="px-4 py-3 align-middle">
-                  <div className="flex flex-wrap gap-2">
+                <td className="px-3 align-middle" style={cellStyle}>
+                  <div className="flex flex-wrap gap-1" style={{ maxHeight: rowHeight - cellPaddingY * 2, overflow: "hidden" }}>
                     <button
                       aria-label="Mover tarefa para cima"
-                      className="rounded-2xl border border-[var(--border)] p-2 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-white"
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-[#f4f6f2]"
                       onClick={(event) => {
                         event.stopPropagation();
                         onMoveUp(task.id);
@@ -276,7 +348,7 @@ export function TaskGrid({
                     </button>
                     <button
                       aria-label="Mover tarefa para baixo"
-                      className="rounded-2xl border border-[var(--border)] p-2 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-white"
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-[#f4f6f2]"
                       onClick={(event) => {
                         event.stopPropagation();
                         onMoveDown(task.id);
@@ -288,7 +360,7 @@ export function TaskGrid({
                     </button>
                     <button
                       aria-label="Indentar tarefa"
-                      className="rounded-2xl border border-[var(--border)] p-2 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-white"
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-[#f4f6f2]"
                       onClick={(event) => {
                         event.stopPropagation();
                         onIndent(task.id);
@@ -300,7 +372,7 @@ export function TaskGrid({
                     </button>
                     <button
                       aria-label="Desindentar tarefa"
-                      className="rounded-2xl border border-[var(--border)] p-2 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-white"
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-[#f4f6f2]"
                       onClick={(event) => {
                         event.stopPropagation();
                         onOutdent(task.id);
@@ -312,7 +384,7 @@ export function TaskGrid({
                     </button>
                     <button
                       aria-label="Inserir nova tarefa abaixo"
-                      className="rounded-2xl border border-[var(--border)] p-2 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-white"
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-[#f4f6f2]"
                       onClick={(event) => {
                         event.stopPropagation();
                         onAddBelow(task.id);
@@ -324,7 +396,7 @@ export function TaskGrid({
                     </button>
                     <button
                       aria-label="Excluir tarefa"
-                      className="rounded-2xl border border-[var(--border)] p-2 text-[var(--muted)] transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--muted)] transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
                       onClick={(event) => {
                         event.stopPropagation();
                         onDelete(task.id);
@@ -343,4 +415,5 @@ export function TaskGrid({
       </table>
     </div>
   );
-}
+  },
+);

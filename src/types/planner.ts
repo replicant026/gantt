@@ -4,6 +4,30 @@ export type TaskKind = "task" | "milestone";
 export type ComputedTaskKind = TaskKind | "summary";
 export type DependencyType = "FS" | "SS" | "FF" | "SF";
 export type ChartViewMode = "Day" | "Week" | "Month";
+export type GanttLabelPosition = "inside" | "right" | "left" | "hidden";
+export type GanttLabelContent =
+  | "name"
+  | "code-name"
+  | "name-progress"
+  | "code-name-progress"
+  | "wbs-name";
+export type GanttFontFamily = "manrope" | "plex" | "georgia" | "system";
+
+export interface GanttAppearanceSettings {
+  barColor: string;
+  progressColor: string;
+  summaryColor: string;
+  milestoneColor: string;
+  dependencyColor: string;
+  labelColor: string;
+  showDependencies: boolean;
+  showTodayHighlight: boolean;
+  labelPosition: GanttLabelPosition;
+  labelContent: GanttLabelContent;
+  fontFamily: GanttFontFamily;
+  barHeight: number;
+  rowPadding: number;
+}
 
 export interface ResolvedDependencyLink {
   dependencyId: string;

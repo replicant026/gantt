@@ -31,12 +31,14 @@ declare module "frappe-gantt" {
     readonly_progress?: boolean;
     readonly_dates?: boolean;
     move_dependencies?: boolean;
+    bar_height?: number;
+    padding?: number;
     view_mode?: string;
     view_modes?: Array<string | { name: string }>;
     language?: string;
     today_button?: boolean;
     scroll_to?: string | null;
-    popup?: (ctx: FrappePopupContext) => void;
+    popup?: false | ((ctx: FrappePopupContext) => void);
     on_click?: (task: FrappeTask) => void;
     on_double_click?: (task: FrappeTask) => void;
     on_date_change?: (task: FrappeTask, start: Date, end: Date) => void;

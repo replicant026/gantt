@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
-  CalendarDays,
   CircleAlert,
   Copy,
   Download,
@@ -11,14 +10,23 @@ import {
   HardDriveDownload,
   History,
   Layers3,
+  MoreHorizontal,
   Plus,
   RotateCcw,
   Save,
+  SlidersHorizontal,
   Trash2,
   Upload,
+  X,
+  Redo2,
+  Undo2,
   Zap,
 } from "lucide-react";
 
+import {
+  DEFAULT_GANTT_APPEARANCE,
+  sanitizeAppearanceSettings,
+} from "@/lib/planner-appearance";
 import { formatHumanDate, nowISO, todayISO } from "@/lib/date-utils";
 import {
   createProject,
@@ -36,7 +44,6 @@ import {
   buildTaskPatchFromDates,
   buildTaskPatchFromDuration,
   buildTaskPatchFromEndDate,
-  calculatePlannerStats,
   parseDependencyInput,
   resolvePlannerProject,
 } from "@/lib/planner-engine";
@@ -50,24 +57,32 @@ import {
 import { plannerBundleSchema } from "@/lib/planner-schema";
 import type {
   DependencyRecord,
+  GanttAppearanceSettings,
   PlannerExportBundle,
   PlannerProjectBundle,
   ProjectRecord,
   ProjectViewRecord,
   ResolvedPlannerProject,
   ResolvedTask,
+  SnapshotRecord,
   TaskRecord,
 } from "@/types/planner";
 
-import { GanttPanel } from "./gantt-panel";
+import { GanttPanel, type GanttPanelHandle } from "./gantt-panel";
+import { UndoManager } from "@/lib/undo-manager";
+import { PlannerSettingsDrawer } from "./planner-settings-drawer";
 import { TaskGrid } from "./task-grid";
 
 type NoticeTone = "success" | "error" | "info";
+type WorkspaceView = "split" | "tasks" | "gantt";
 
 type Notice = {
   tone: NoticeTone;
   message: string;
 };
+
+const TASK_PANE_MIN_WIDTH = 620;
+const GANTT_PANE_MIN_WIDTH = 540;
 
 function sortTasksByOrder(tasks: TaskRecord[]): TaskRecord[] {
   return [...tasks].sort((a, b) => a.order - b.order);
@@ -189,7 +204,9 @@ function outdentTaskBlock(tasks: TaskRecord[], taskId: string): TaskRecord[] {
   const updatedBlock = currentRange.items.map((item) =>
     item.id === taskId ? { ...item, parentId: parent.parentId ?? null } : item,
   );
-  const remaining = tasks.filter((item) => !currentRange.items.some((block) => block.id === item.id));
+  const remaining = tasks.filter(
+    (item) => !currentRange.items.some((block) => block.id === item.id),
+  );
   const insertionIndex = Math.min(
     remaining.length,
     parentRange.endIndex - updatedBlock.length + 1,
@@ -280,7 +297,7 @@ function NoticeBanner({ notice }: { notice: Notice | null }) {
 
   return (
     <div
-      className={`glass-card flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm ${palette[notice.tone]}`}
+      className={`mx-4 mt-3 flex items-center gap-3 rounded-md border px-3 py-2 text-sm ${palette[notice.tone]}`}
     >
       <CircleAlert className="h-4 w-4" />
       <span>{notice.message}</span>
@@ -288,31 +305,7 @@ function NoticeBanner({ notice }: { notice: Notice | null }) {
   );
 }
 
-function StatCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-}) {
-  return (
-    <div className="glass-card rounded-3xl px-4 py-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--muted-soft)]">
-        {label}
-      </p>
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <p className="text-3xl font-semibold text-[var(--foreground)]">{value}</p>
-        <p className="max-w-[10rem] text-right text-xs text-[var(--muted)]">
-          {hint}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function ProjectRail({
+function ProjectMenu({
   projects,
   activeProjectId,
   onSelectProject,
@@ -328,28 +321,39 @@ function ProjectRail({
   onDeleteProject: () => void;
 }) {
   return (
-    <aside className="space-y-4">
-      <div className="glass-card rounded-[28px] p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--muted-soft)]">
-              Linea Planner
-            </p>
-            <h1 className="mt-3 text-2xl font-semibold text-[var(--foreground)]">
-              Cronogramas privados
-            </h1>
-            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              Use local-first, refine dependencias e so depois leve para deploy.
-            </p>
-          </div>
-          <div className="rounded-2xl bg-[var(--accent-soft)] p-3 text-[var(--accent)]">
-            <Layers3 className="h-5 w-5" />
-          </div>
+    <details className="relative">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]">
+        <Layers3 className="h-4 w-4" />
+        Projetos
+      </summary>
+      <div className="planner-popover absolute left-0 top-[calc(100%+8px)] z-30 w-[320px] rounded-md border border-[var(--border)] bg-white p-2 shadow-[0_18px_42px_rgba(18,24,20,0.12)]">
+        <div className="planner-scrollbar max-h-[50vh] overflow-y-auto">
+          {projects.map((project) => {
+            const active = project.id === activeProjectId;
+            return (
+              <button
+                key={project.id}
+                className={`w-full rounded-md px-3 py-2.5 text-left transition ${
+                  active
+                    ? "bg-[var(--accent-soft)] text-[var(--foreground)]"
+                    : "hover:bg-[#f4f6f2]"
+                }`}
+                onClick={() => onSelectProject(project.id)}
+                type="button"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="truncate font-semibold">{project.name}</span>
+                  <span className="mono text-[11px] text-[var(--muted-soft)]">
+                    {formatHumanDate(project.startDate)}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
         </div>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+        <div className="mt-2 border-t border-[var(--border)] pt-2">
           <button
-            className="flex items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[#f4f6f2]"
             onClick={onCreateProject}
             type="button"
           >
@@ -357,67 +361,30 @@ function ProjectRail({
             Novo projeto
           </button>
           <button
-            className="flex items-center justify-center gap-2 rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[#f4f6f2]"
             onClick={onDuplicateProject}
             type="button"
           >
             <Copy className="h-4 w-4" />
-            Duplicar
+            Duplicar atual
           </button>
-        </div>
-      </div>
-
-      <div className="panel-card rounded-[28px] p-3">
-        <div className="flex items-center justify-between px-2 pb-2">
-          <p className="text-sm font-semibold text-[var(--foreground)]">Projetos</p>
           <button
-            className="rounded-xl p-2 text-[var(--muted)] transition hover:bg-white hover:text-[var(--danger)]"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50"
             onClick={onDeleteProject}
             type="button"
           >
             <Trash2 className="h-4 w-4" />
+            Excluir atual
           </button>
         </div>
-        <div className="planner-scrollbar max-h-[60vh] space-y-2 overflow-y-auto pr-1">
-          {projects.map((project) => {
-            const active = project.id === activeProjectId;
-            return (
-              <button
-                key={project.id}
-                className={`w-full rounded-3xl border px-4 py-4 text-left transition ${
-                  active
-                    ? "border-[var(--accent)] bg-white shadow-[0_16px_40px_rgba(24,32,27,0.08)]"
-                    : "border-transparent bg-white/60 hover:border-[var(--border)]"
-                }`}
-                onClick={() => onSelectProject(project.id)}
-                type="button"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="line-clamp-1 font-semibold text-[var(--foreground)]">
-                    {project.name}
-                  </p>
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: project.accent }}
-                  />
-                </div>
-                <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--muted)]">
-                  {project.description || "Sem descricao ainda. Ajuste o escopo no painel central."}
-                </p>
-                <div className="mt-3 flex items-center gap-2 text-xs text-[var(--muted-soft)]">
-                  <CalendarDays className="h-3.5 w-3.5" />
-                  Inicio {formatHumanDate(project.startDate)}
-                </div>
-              </button>
-            );
-          })}
-        </div>
       </div>
-    </aside>
+    </details>
   );
 }
 
-function ExportMenu({
+function FileMenu({
+  onCreateSnapshot,
+  onOpenSnapshots,
   onExportJson,
   onExportCsv,
   onExportXlsx,
@@ -425,6 +392,8 @@ function ExportMenu({
   onExportPdf,
   onImportJson,
 }: {
+  onCreateSnapshot: () => void;
+  onOpenSnapshots: () => void;
   onExportJson: () => void;
   onExportCsv: () => void;
   onExportXlsx: () => void;
@@ -436,34 +405,51 @@ function ExportMenu({
 
   return (
     <details className="relative">
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]">
-        <Download className="h-4 w-4" />
-        Exportar
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]">
+        <MoreHorizontal className="h-4 w-4" />
+        Arquivo
       </summary>
-      <div className="glass-card absolute right-0 top-[calc(100%+12px)] z-20 w-56 rounded-3xl p-2">
+      <div className="planner-popover absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] rounded-md border border-[var(--border)] bg-white p-2 shadow-[0_18px_42px_rgba(18,24,20,0.12)]">
+        <button
+          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[#f4f6f2]"
+          onClick={onCreateSnapshot}
+          type="button"
+        >
+          <Save className="h-4 w-4" />
+          Salvar snapshot
+        </button>
+        <button
+          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[#f4f6f2]"
+          onClick={onOpenSnapshots}
+          type="button"
+        >
+          <History className="h-4 w-4" />
+          Restaurar snapshot
+        </button>
+        <div className="my-2 border-t border-[var(--border)]" />
         {[
-          { label: "JSON do projeto", handler: onExportJson },
-          { label: "CSV da grade", handler: onExportCsv },
-          { label: "XLSX do cronograma", handler: onExportXlsx },
-          { label: "PNG do Gantt", handler: onExportPng },
-          { label: "PDF do Gantt", handler: onExportPdf },
-        ].map(({ label, handler }) => (
+          { label: "Exportar JSON", icon: Download, handler: onExportJson },
+          { label: "Exportar CSV", icon: HardDriveDownload, handler: onExportCsv },
+          { label: "Exportar XLSX", icon: HardDriveDownload, handler: onExportXlsx },
+          { label: "Exportar PNG", icon: HardDriveDownload, handler: onExportPng },
+          { label: "Exportar PDF", icon: HardDriveDownload, handler: onExportPdf },
+        ].map(({ label, icon: Icon, handler }) => (
           <button
             key={label}
-            className="flex w-full items-center gap-2 rounded-2xl px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[var(--accent-soft)]"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[#f4f6f2]"
             onClick={handler}
             type="button"
           >
-            <HardDriveDownload className="h-4 w-4 text-[var(--accent)]" />
+            <Icon className="h-4 w-4" />
             {label}
           </button>
         ))}
         <button
-          className="mt-1 flex w-full items-center gap-2 rounded-2xl px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[var(--accent-soft)]"
+          className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--foreground)] transition hover:bg-[#f4f6f2]"
           onClick={() => inputRef.current?.click()}
           type="button"
         >
-          <Upload className="h-4 w-4 text-[var(--accent)]" />
+          <Upload className="h-4 w-4" />
           Importar JSON
         </button>
         <input
@@ -484,186 +470,78 @@ function ExportMenu({
   );
 }
 
-function InspectorPanel({
-  project,
-  task,
-  onToggleOpen,
-  onUpdateNotes,
-  onUpdateProgress,
+function SnapshotDrawer({
+  projectName,
+  snapshots,
+  onClose,
+  onRestore,
 }: {
-  project: ResolvedPlannerProject;
-  task: ResolvedTask | null;
-  onToggleOpen: () => void;
-  onUpdateNotes: (taskId: string, notes: string) => void;
-  onUpdateProgress: (taskId: string, progress: number) => void;
+  projectName: string;
+  snapshots: SnapshotRecord[];
+  onClose: () => void;
+  onRestore: (snapshotId: string) => void;
 }) {
-  const isOpen = project.view?.rightPanelOpen ?? true;
-
   return (
-    <aside className="space-y-4">
-      <div className="glass-card rounded-[28px] p-4">
-        <div className="flex items-center justify-between gap-3">
+    <div className="fixed inset-0 z-40 bg-black/20">
+      <div className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-[var(--border)] bg-white shadow-[0_18px_42px_rgba(18,24,20,0.18)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-4 py-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--muted-soft)]">
-              Contexto
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted-soft)]">
+              Snapshots
             </p>
-            <h2 className="mt-2 text-lg font-semibold text-[var(--foreground)]">
-              Painel da tarefa
+            <h2 className="mt-1 text-lg font-semibold text-[var(--foreground)]">
+              {projectName}
             </h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Restaurar salva um backup automático do estado atual antes da troca.
+            </p>
           </div>
           <button
-            className="rounded-2xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]"
-            onClick={onToggleOpen}
+            className="rounded-md border border-[var(--border)] p-2 text-[var(--muted)] transition hover:border-[var(--border-strong)] hover:bg-[#f4f6f2]"
+            onClick={onClose}
             type="button"
           >
-            {isOpen ? "Ocultar" : "Mostrar"}
+            <X className="h-4 w-4" />
           </button>
         </div>
+        <div className="planner-scrollbar flex-1 space-y-3 overflow-y-auto p-4">
+          {snapshots.length > 0 ? (
+            snapshots.map((snapshot) => (
+              <div key={snapshot.id} className="rounded-md border border-[var(--border)] bg-[#fafbf8] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-[var(--foreground)]">{snapshot.label}</p>
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                      {new Date(snapshot.createdAt).toLocaleString("pt-BR")}
+                    </p>
+                  </div>
+                  <button
+                    className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]"
+                    onClick={() => onRestore(snapshot.id)}
+                    type="button"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Restaurar
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
+                  <span className="rounded-full bg-white px-3 py-1">
+                    {snapshot.bundle.tasks.length} tarefas
+                  </span>
+                  <span className="rounded-full bg-white px-3 py-1">
+                    {snapshot.bundle.dependencies.length} dependências
+                  </span>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-md border border-dashed border-[var(--border)] px-4 py-10 text-center text-sm text-[var(--muted)]">
+              Nenhum snapshot salvo ainda.
+            </div>
+          )}
+        </div>
       </div>
-
-      {isOpen ? (
-        task ? (
-          <div className="space-y-4">
-            <div className="panel-card rounded-[28px] p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="mono text-xs text-[var(--muted-soft)]">#{task.code}</p>
-                  <h3 className="mt-1 text-xl font-semibold text-[var(--foreground)]">
-                    {task.name}
-                  </h3>
-                </div>
-                <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]">
-                  {task.computedKind}
-                </span>
-              </div>
-
-              <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-2xl bg-white/70 p-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted-soft)]">
-                    Inicio
-                  </p>
-                  <p className="mt-2 font-semibold text-[var(--foreground)]">
-                    {formatHumanDate(task.startDate)}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-white/70 p-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted-soft)]">
-                    Fim
-                  </p>
-                  <p className="mt-2 font-semibold text-[var(--foreground)]">
-                    {formatHumanDate(task.endDate)}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-white/70 p-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted-soft)]">
-                    Duracao
-                  </p>
-                  <p className="mt-2 font-semibold text-[var(--foreground)]">
-                    {task.durationDays} {task.durationDays === 1 ? "dia" : "dias"}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-white/70 p-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted-soft)]">
-                    Estrutura
-                  </p>
-                  <p className="mt-2 font-semibold text-[var(--foreground)]">WBS {task.wbs}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="panel-card rounded-[28px] p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-[var(--foreground)]">Progresso</p>
-                  <p className="mt-1 text-sm text-[var(--muted)]">
-                    Ajuste visual rapido para acompanhar a barra do Gantt.
-                  </p>
-                </div>
-                <span className="mono text-lg font-semibold text-[var(--foreground)]">
-                  {task.progress}%
-                </span>
-              </div>
-              <input
-                className="mt-4 w-full accent-[var(--accent)]"
-                defaultValue={task.progress}
-                disabled={task.isSummary}
-                key={`${task.id}-${task.updatedAt}-progress`}
-                max={100}
-                min={0}
-                onMouseUp={(event) => {
-                  onUpdateProgress(task.id, Number((event.target as HTMLInputElement).value));
-                }}
-                type="range"
-              />
-            </div>
-
-            <div className="panel-card rounded-[28px] p-5">
-              <p className="text-sm font-semibold text-[var(--foreground)]">Dependencias</p>
-              <div className="mt-4 space-y-3 text-sm">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted-soft)]">
-                    Predecessoras
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {task.predecessorCodes.length > 0 ? (
-                      task.predecessorLinks.map((link) => (
-                        <span
-                          key={link.dependencyId}
-                          className="mono rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-semibold text-[var(--accent)]"
-                        >
-                          {link.label}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-[var(--muted)]">Sem predecessoras.</span>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted-soft)]">
-                    Sucessoras
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {task.successorCodes.length > 0 ? (
-                      task.successorLinks.map((link) => (
-                        <span
-                          key={link.dependencyId}
-                          className="mono rounded-full bg-[#f4e6de] px-3 py-1 text-xs font-semibold text-[var(--copper)]"
-                        >
-                          {link.label}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-[var(--muted)]">Sem sucessoras.</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="panel-card rounded-[28px] p-5">
-              <p className="text-sm font-semibold text-[var(--foreground)]">Notas</p>
-              <textarea
-                className="mt-4 min-h-36 w-full rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm text-[var(--foreground)] outline-none transition focus:border-[var(--accent)]"
-                defaultValue={task.notes}
-                key={`${task.id}-${task.updatedAt}-notes`}
-                onBlur={(event) => onUpdateNotes(task.id, event.target.value)}
-                placeholder="Anote premissas, responsaveis ou riscos desta tarefa."
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="panel-card rounded-[28px] p-8 text-center">
-            <p className="text-sm font-semibold text-[var(--foreground)]">
-              Selecione uma tarefa
-            </p>
-            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              O painel lateral mostra progresso, dependencias e notas da linha ativa.
-            </p>
-          </div>
-        )
-      ) : null}
-    </aside>
+    </div>
   );
 }
 
@@ -671,9 +549,63 @@ export function PlannerWorkspace() {
   const [ready, setReady] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const ganttExportRef = useRef<HTMLDivElement | null>(null);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() => {
+    if (typeof window === "undefined") {
+      return "split";
+    }
+
+    const stored = window.localStorage.getItem("linea-workspace-view");
+    return stored === "tasks" || stored === "gantt" || stored === "split"
+      ? stored
+      : "split";
+  });
+  const [taskPaneWidth, setTaskPaneWidth] = useState(() => {
+    if (typeof window === "undefined") {
+      return 760;
+    }
+
+    const stored = Number(window.localStorage.getItem("linea-task-pane-width"));
+    return Number.isFinite(stored) && stored >= TASK_PANE_MIN_WIDTH ? stored : 760;
+  });
+  const [appearance, setAppearance] = useState<GanttAppearanceSettings>(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_GANTT_APPEARANCE;
+    }
+
+    try {
+      const stored = window.localStorage.getItem("linea-gantt-appearance");
+      return stored
+        ? sanitizeAppearanceSettings(
+            JSON.parse(stored) as Partial<GanttAppearanceSettings>,
+          )
+        : DEFAULT_GANTT_APPEARANCE;
+    } catch {
+      return DEFAULT_GANTT_APPEARANCE;
+    }
+  });
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const ganttExportRef = useRef<GanttPanelHandle | null>(null);
+  const taskGridRef = useRef<HTMLDivElement | null>(null);
   const noticeTimeoutRef = useRef<number | null>(null);
+  const scrollSyncLock = useRef(false);
+  const [undoManagerRef] = useState(() => new UndoManager());
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        void undoManagerRef.undo();
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        void undoManagerRef.redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undoManagerRef]);
 
   const projects = useLiveQuery(
     () => plannerDb.projects.orderBy("updatedAt").reverse().toArray(),
@@ -730,11 +662,39 @@ export function PlannerWorkspace() {
   }, [activeProjectId]);
 
   useEffect(() => {
+    window.localStorage.setItem("linea-workspace-view", workspaceView);
+  }, [workspaceView]);
+
+  useEffect(() => {
+    window.localStorage.setItem("linea-task-pane-width", String(taskPaneWidth));
+  }, [taskPaneWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem("linea-gantt-appearance", JSON.stringify(appearance));
+  }, [appearance]);
+
+  useEffect(() => {
     return () => {
       if (noticeTimeoutRef.current) {
         window.clearTimeout(noticeTimeoutRef.current);
       }
     };
+  }, []);
+
+  // Sync task grid scroll → Gantt panel
+  useEffect(() => {
+    const el = taskGridRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      if (scrollSyncLock.current) return;
+      scrollSyncLock.current = true;
+      ganttExportRef.current?.setScrollTop(el.scrollTop);
+      requestAnimationFrame(() => { scrollSyncLock.current = false; });
+    };
+
+    el.addEventListener("scroll", handleScroll);
+    return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
   const resolvedProject = useMemo<ResolvedPlannerProject | null>(() => {
@@ -748,22 +708,14 @@ export function PlannerWorkspace() {
     return getVisibleTasks(resolvedProject?.resolvedTasks ?? []);
   }, [resolvedProject]);
 
-  const stats = useMemo(() => {
-    return calculatePlannerStats(
-      resolvedProject?.resolvedTasks ?? [],
-      resolvedProject?.dependencies.length ?? 0,
-    );
-  }, [resolvedProject]);
-
-  const selectedTask = useMemo(() => {
-    if (!resolvedProject) {
-      return null;
+  const handleGanttVerticalScroll = useCallback((scrollTop: number) => {
+    if (scrollSyncLock.current) return;
+    scrollSyncLock.current = true;
+    if (taskGridRef.current) {
+      taskGridRef.current.scrollTop = scrollTop;
     }
-    const selectedTaskId = resolvedProject.view?.selectedTaskId ?? null;
-    return (
-      resolvedProject.resolvedTasks.find((task) => task.id === selectedTaskId) ?? null
-    );
-  }, [resolvedProject]);
+    requestAnimationFrame(() => { scrollSyncLock.current = false; });
+  }, []);
 
   function pushNotice(tone: NoticeTone, message: string) {
     setNotice({ tone, message });
@@ -773,6 +725,54 @@ export function PlannerWorkspace() {
     noticeTimeoutRef.current = window.setTimeout(() => {
       setNotice(null);
     }, 3200);
+  }
+
+  function handleAppearanceChange<K extends keyof GanttAppearanceSettings>(
+    key: K,
+    value: GanttAppearanceSettings[K],
+  ) {
+    setAppearance((current) => sanitizeAppearanceSettings({ ...current, [key]: value }));
+  }
+
+  function resetAppearance() {
+    setAppearance(DEFAULT_GANTT_APPEARANCE);
+  }
+
+  function startResizeTaskPane(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!splitContainerRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    const pointerId = event.pointerId;
+    event.currentTarget.setPointerCapture(pointerId);
+
+    const move = (moveEvent: PointerEvent) => {
+      const container = splitContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      const rect = container.getBoundingClientRect();
+      const maxWidth = Math.max(
+        TASK_PANE_MIN_WIDTH,
+        rect.width - GANTT_PANE_MIN_WIDTH - 8,
+      );
+      const nextWidth = Math.min(
+        maxWidth,
+        Math.max(TASK_PANE_MIN_WIDTH, moveEvent.clientX - rect.left),
+      );
+      setTaskPaneWidth(nextWidth);
+    };
+
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      event.currentTarget.releasePointerCapture(pointerId);
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
   }
 
   async function persistGraph(
@@ -938,13 +938,9 @@ export function PlannerWorkspace() {
       nextTasks.push(newTask);
     }
 
-    await persistGraph(
-      nextTasks,
-      resolvedProject.dependencies,
-      {
-        view: buildProjectView(resolvedProject, { selectedTaskId: newTask.id }),
-      },
-    );
+    await persistGraph(nextTasks, resolvedProject.dependencies, {
+      view: buildProjectView(resolvedProject, { selectedTaskId: newTask.id }),
+    });
     pushNotice("success", "Linha criada abaixo da seleção atual.");
   }
 
@@ -1021,6 +1017,23 @@ export function PlannerWorkspace() {
     await persistGraph(nextTasks, resolvedProject.dependencies);
   }
 
+  async function handleReorderTask(taskId: string, targetIndex: number) {
+    if (!resolvedProject) {
+      return;
+    }
+
+    const orderedTasks = sortTasksByOrder(resolvedProject.tasks);
+    const srcIndex = orderedTasks.findIndex((t) => t.id === taskId);
+    if (srcIndex === -1 || srcIndex === targetIndex) {
+      return;
+    }
+
+    const nextTasks = [...orderedTasks];
+    const [removed] = nextTasks.splice(srcIndex, 1);
+    nextTasks.splice(targetIndex, 0, removed);
+    await persistGraph(nextTasks, resolvedProject.dependencies);
+  }
+
   async function handleUpdatePredecessors(taskId: string, value: string) {
     if (!resolvedProject) {
       return;
@@ -1028,17 +1041,18 @@ export function PlannerWorkspace() {
 
     const targetTask = resolvedProject.resolvedTasks.find((task) => task.id === taskId);
     if (!targetTask || targetTask.isSummary) {
-      pushNotice("error", "Tarefas-resumo nao aceitam predecessoras diretas.");
+      pushNotice("error", "Tarefas-resumo não aceitam predecessoras diretas.");
       return;
     }
 
     let parsedDependencies;
+
     try {
       parsedDependencies = parseDependencyInput(value);
     } catch {
       pushNotice(
         "error",
-        "Use o formato 12, 15SS, 18FF+2d ou 20SF-1d para editar dependencias.",
+        "Use o formato 12, 15SS, 18FF+2d ou 20SF-1d para editar dependências.",
       );
       return;
     }
@@ -1049,14 +1063,13 @@ export function PlannerWorkspace() {
       type: DependencyRecord["type"];
       lagDays: number;
     }> = [];
-
     const seenCodes = new Set<number>();
 
     for (const parsed of parsedDependencies) {
       if (seenCodes.has(parsed.code)) {
         pushNotice(
           "error",
-          `A tarefa ${parsed.code} foi repetida. Use apenas uma ligacao por predecessora na mesma celula.`,
+          `A tarefa ${parsed.code} foi repetida. Use apenas uma ligação por predecessora na mesma célula.`,
         );
         return;
       }
@@ -1066,12 +1079,12 @@ export function PlannerWorkspace() {
       if (!predecessor) {
         pushNotice(
           "error",
-          `A tarefa ${parsed.code} nao foi encontrada para criar a dependencia.`,
+          `A tarefa ${parsed.code} não foi encontrada para criar a dependência.`,
         );
         return;
       }
       if (predecessor.id === taskId) {
-        pushNotice("error", "Uma tarefa nao pode depender dela mesma.");
+        pushNotice("error", "Uma tarefa não pode depender dela mesma.");
         return;
       }
       const predecessorResolved = resolvedProject.resolvedTasks.find(
@@ -1080,7 +1093,7 @@ export function PlannerWorkspace() {
       if (predecessorResolved?.isSummary) {
         pushNotice(
           "error",
-          "Nao use tarefas-resumo como predecessoras. Vincule as tarefas filhas executaveis.",
+          "Não use tarefas-resumo como predecessoras. Vincule as tarefas filhas executáveis.",
         );
         return;
       }
@@ -1132,7 +1145,7 @@ export function PlannerWorkspace() {
       setActiveProjectId(importedId);
       pushNotice("success", "Projeto importado para o armazenamento local.");
     } catch {
-      pushNotice("error", "Nao foi possivel importar este arquivo JSON.");
+      pushNotice("error", "Não foi possível importar este arquivo JSON.");
     }
   }
 
@@ -1145,7 +1158,7 @@ export function PlannerWorkspace() {
       resolvedProject.project.id,
       `Snapshot ${new Date().toLocaleString("pt-BR")}`,
     );
-    pushNotice("success", "Snapshot salvo para restauracao local.");
+    pushNotice("success", "Snapshot salvo para restauração local.");
     setIsSnapshotsOpen(true);
   }
 
@@ -1155,7 +1168,7 @@ export function PlannerWorkspace() {
     }
 
     const confirmed = window.confirm(
-      "Deseja restaurar este snapshot? O estado atual sera substituido, mas um backup automatico sera salvo antes.",
+      "Deseja restaurar este snapshot? O estado atual será substituído, mas um backup automático será salvo antes.",
     );
     if (!confirmed) {
       return;
@@ -1163,25 +1176,25 @@ export function PlannerWorkspace() {
 
     const restored = await restoreSnapshot(snapshotId);
     if (restored) {
-      pushNotice("success", "Snapshot restaurado com backup automatico do estado atual.");
+      pushNotice("success", "Snapshot restaurado com backup automático do estado atual.");
+      setIsSnapshotsOpen(false);
     } else {
-      pushNotice("error", "Nao foi possivel restaurar o snapshot selecionado.");
+      pushNotice("error", "Não foi possível restaurar o snapshot selecionado.");
     }
   }
 
   if (!ready || !projects) {
     return (
       <div className="planner-shell flex min-h-screen items-center justify-center px-6">
-        <div className="glass-card rounded-[32px] px-8 py-10 text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--muted-soft)]">
+        <div className="rounded-md border border-[var(--border)] bg-white px-8 py-10 text-center shadow-[0_18px_42px_rgba(18,24,20,0.1)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted-soft)]">
             Inicializando
           </p>
           <h1 className="mt-4 text-3xl font-semibold text-[var(--foreground)]">
-            Preparando o workspace do cronograma
+            Preparando o cronograma
           </h1>
           <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">
-            Estamos configurando o armazenamento local, o projeto seed e a estrutura do
-            planejador privado.
+            Configurando o armazenamento local e carregando o projeto de trabalho.
           </p>
         </div>
       </div>
@@ -1191,10 +1204,10 @@ export function PlannerWorkspace() {
   if (!resolvedProject) {
     return (
       <div className="planner-shell flex min-h-screen items-center justify-center px-6">
-        <div className="glass-card rounded-[32px] px-8 py-10 text-center">
+        <div className="rounded-md border border-[var(--border)] bg-white px-8 py-10 text-center shadow-[0_18px_42px_rgba(18,24,20,0.1)]">
           <p className="text-sm text-[var(--muted)]">Nenhum projeto carregado.</p>
           <button
-            className="mt-4 rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white"
+            className="mt-4 rounded-md bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white"
             onClick={handleCreateProject}
             type="button"
           >
@@ -1205,220 +1218,164 @@ export function PlannerWorkspace() {
     );
   }
 
+  const showTaskPane = workspaceView !== "gantt";
+  const showGanttPane = workspaceView !== "tasks";
+  const gridRowHeight = Math.max(36, appearance.barHeight + appearance.rowPadding);
+  // Gantt internal header = upper(45) + lower(30) + gap(10) = 85px (constant)
+  // Gantt panel wrapper has p-3 = 12px top padding. Task grid thead is ~36px.
+  const taskHeaderOffset = 85 + 12 - 36 - 2;
+
   return (
-    <div className="planner-shell min-h-screen px-4 py-4 lg:px-6 lg:py-6">
-      <div className="mx-auto max-w-[1800px] space-y-4">
-        <NoticeBanner notice={notice} />
-
-        <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
-          <ProjectRail
-            activeProjectId={activeProjectId}
-            onCreateProject={handleCreateProject}
-            onDeleteProject={handleDeleteProject}
-            onDuplicateProject={handleDuplicateProject}
-            onSelectProject={setActiveProjectId}
-            projects={projects}
-          />
-
-          <main className="space-y-4">
-            <section className="glass-card rounded-[32px] p-6">
-              <div className="flex flex-col gap-6 2xl:flex-row 2xl:items-start 2xl:justify-between">
-                <div className="max-w-3xl">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--muted-soft)]">
-                    Workspace principal
-                  </p>
-                  <input
-                    className="mt-3 w-full bg-transparent text-4xl font-semibold tracking-tight text-[var(--foreground)] outline-none"
-                    defaultValue={resolvedProject.project.name}
-                    key={`${resolvedProject.project.id}-${resolvedProject.project.updatedAt}-name`}
-                    onBlur={(event) => {
-                      const nextName = event.target.value.trim();
-                      if (nextName.length > 0) {
-                        void updateProject({ name: nextName });
-                      }
-                    }}
-                  />
-                  <textarea
-                    className="mt-3 min-h-20 w-full resize-none bg-transparent text-sm leading-7 text-[var(--muted)] outline-none"
-                    defaultValue={resolvedProject.project.description}
-                    key={`${resolvedProject.project.id}-${resolvedProject.project.updatedAt}-description`}
-                    onBlur={(event) => {
-                      void updateProject({ description: event.target.value.trim() });
-                    }}
-                    placeholder="Descreva a intencao do projeto, o escopo da entrega e a logica do cronograma."
-                  />
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]"
-                    onClick={() => void handleAddTask(resolvedProject.view?.selectedTaskId ?? undefined)}
-                    type="button"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Nova tarefa
-                  </button>
-                  <button
-                    className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]"
-                    onClick={() => void handleCreateSnapshot()}
-                    type="button"
-                  >
-                    <Save className="h-4 w-4" />
-                    Snapshot
-                  </button>
-                  <button
-                    className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]"
-                    onClick={() => setIsSnapshotsOpen((current) => !current)}
-                    type="button"
-                  >
-                    <History className="h-4 w-4" />
-                    Restaurar
-                  </button>
-                  <ExportMenu
-                    onExportCsv={() => exportProjectCsv(resolvedProject.project, resolvedProject.resolvedTasks)}
-                    onExportJson={() =>
-                      exportProjectJson({
-                        schemaVersion: 1,
-                        exportedAt: nowISO(),
-                        project: resolvedProject.project,
-                        tasks: resolvedProject.tasks,
-                        dependencies: resolvedProject.dependencies,
-                        view: resolvedProject.view,
-                      })
-                    }
-                    onExportPdf={() => {
-                      if (ganttExportRef.current) {
-                        void exportGanttPdf(ganttExportRef.current, resolvedProject.project);
-                      }
-                    }}
-                    onExportPng={() => {
-                      if (ganttExportRef.current) {
-                        void exportGanttPng(ganttExportRef.current, resolvedProject.project);
-                      }
-                    }}
-                    onExportXlsx={() => exportProjectXlsx(resolvedProject.project, resolvedProject.resolvedTasks)}
-                    onImportJson={(file) => {
-                      void handleImportJson(file);
-                    }}
-                  />
-                </div>
-              </div>
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-              <StatCard
-                hint="itens totais no workspace, incluindo resumos e marcos"
-                label="Itens"
-                value={String(stats.totalTasks)}
+    <div className="planner-shell flex min-h-screen flex-col">
+      <header className="border-b border-[var(--border)] bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <ProjectMenu
+              activeProjectId={activeProjectId}
+              onCreateProject={handleCreateProject}
+              onDeleteProject={handleDeleteProject}
+              onDuplicateProject={handleDuplicateProject}
+              onSelectProject={setActiveProjectId}
+              projects={projects}
+            />
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--muted-soft)]">
+                Cronograma ativo
+              </p>
+              <input
+                className="h-9 min-w-[240px] max-w-[560px] bg-transparent text-lg font-semibold text-[var(--foreground)] outline-none"
+                defaultValue={resolvedProject.project.name}
+                key={`${resolvedProject.project.id}-${resolvedProject.project.updatedAt}-name`}
+                onBlur={(event) => {
+                  const nextName = event.target.value.trim();
+                  if (nextName.length > 0) {
+                    void updateProject({ name: nextName });
+                  }
+                }}
               />
-              <StatCard
-                hint="percentual medio de progresso do cronograma ativo"
-                label="Conclusao"
-                value={`${stats.completion}%`}
-              />
-              <StatCard
-                hint="linhas que agrupam subtarefas na estrutura hierarquica"
-                label="Resumos"
-                value={String(stats.summaryTasks)}
-              />
-              <StatCard
-                hint="vinculos FS atualmente respeitados no motor de cronograma"
-                label="Dependencias"
-                value={String(stats.dependencies)}
-              />
-            </section>
+            </div>
+          </div>
 
-            {resolvedProject.issues.length > 0 ? (
-              <div className="panel-card rounded-[28px] border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
-                <div className="flex items-center gap-2 font-semibold">
-                  <Zap className="h-4 w-4" />
-                  Pontos para revisar no cronograma
-                </div>
-                <ul className="mt-3 space-y-1.5 text-sm leading-6">
-                  {resolvedProject.issues.slice(0, 4).map((issue) => (
-                    <li key={`${issue.type}-${issue.message}`}>{issue.message}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="flex items-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]"
+              onClick={() => void handleAddTask(resolvedProject.view?.selectedTaskId ?? undefined)}
+              type="button"
+            >
+              <Plus className="h-4 w-4" />
+              Nova tarefa
+            </button>
+            <div className="flex rounded-md border border-[var(--border)] bg-[#f7f8f5] p-1">
+              {[
+                { key: "split", label: "Lado a lado" },
+                { key: "tasks", label: "Tarefas" },
+                { key: "gantt", label: "Gantt" },
+              ].map((option) => (
+                <button
+                  key={option.key}
+                  className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                    workspaceView === option.key
+                      ? "bg-white text-[var(--foreground)] shadow-[0_1px_2px_rgba(18,24,20,0.08)]"
+                      : "text-[var(--muted)]"
+                  }`}
+                  onClick={() => setWorkspaceView(option.key as WorkspaceView)}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <FileMenu
+              onCreateSnapshot={() => {
+                void handleCreateSnapshot();
+              }}
+              onExportCsv={() => exportProjectCsv(resolvedProject.project, resolvedProject.resolvedTasks)}
+              onExportJson={() =>
+                exportProjectJson({
+                  schemaVersion: 1,
+                  exportedAt: nowISO(),
+                  project: resolvedProject.project,
+                  tasks: resolvedProject.tasks,
+                  dependencies: resolvedProject.dependencies,
+                  view: resolvedProject.view,
+                })
+              }
+              onExportPdf={() => {
+                const el = ganttExportRef.current?.exportElement;
+                if (el) {
+                  void exportGanttPdf(el, resolvedProject.project);
+                }
+              }}
+              onExportPng={() => {
+                const el = ganttExportRef.current?.exportElement;
+                if (el) {
+                  void exportGanttPng(el, resolvedProject.project);
+                }
+              }}
+              onExportXlsx={() => exportProjectXlsx(resolvedProject.project, resolvedProject.resolvedTasks)}
+              onImportJson={(file) => {
+                void handleImportJson(file);
+              }}
+              onOpenSnapshots={() => setIsSnapshotsOpen(true)}
+            />
+            <button
+              className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]"
+              onClick={() => setIsSettingsOpen(true)}
+              type="button"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Aparência
+            </button>
+          </div>
+        </div>
+      </header>
 
-            {isSnapshotsOpen ? (
-              <div className="panel-card rounded-[28px] p-5">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <NoticeBanner notice={notice} />
+
+      {resolvedProject.issues.length > 0 ? (
+        <div className="mx-4 mt-3 flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <Zap className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-semibold">Revisar dependências e consistência</p>
+            <p className="mt-1 leading-6">{resolvedProject.issues[0].message}</p>
+          </div>
+        </div>
+      ) : null}
+
+      <main className="min-h-0 flex-1 p-4">
+        <div
+          ref={splitContainerRef}
+          className={`grid h-full min-h-[600px] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--border)] ${
+            workspaceView === "split"
+              ? "lg:grid-cols-[minmax(0,var(--task-pane-width))_8px_minmax(0,1fr)]"
+              : "grid-cols-1"
+          }`}
+          style={
+            workspaceView === "split"
+              ? { ["--task-pane-width" as string]: `${taskPaneWidth}px` }
+              : undefined
+          }
+        >
+          {showTaskPane ? (
+            <section className="min-h-0 bg-white">
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
                   <div>
-                    <p className="text-sm font-semibold text-[var(--foreground)]">
-                      Snapshots locais
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted-soft)]">
+                      Tarefas
                     </p>
                     <p className="mt-1 text-sm text-[var(--muted)]">
-                      Restauram o estado do cronograma com backup automatico do momento atual.
+                      Nome, datas, duração, dependências, progresso e estrutura.
                     </p>
                   </div>
-                  <p className="text-xs text-[var(--muted-soft)]">
-                    {resolvedProject.snapshots.length} snapshots armazenados neste navegador
-                  </p>
-                </div>
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  {resolvedProject.snapshots.length > 0 ? (
-                    resolvedProject.snapshots.slice(0, 8).map((snapshot) => (
-                      <div
-                        key={snapshot.id}
-                        className="rounded-[24px] border border-[var(--border)] bg-white p-4"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <p className="font-semibold text-[var(--foreground)]">
-                              {snapshot.label}
-                            </p>
-                            <p className="mt-1 text-sm text-[var(--muted)]">
-                              {new Date(snapshot.createdAt).toLocaleString("pt-BR")}
-                            </p>
-                          </div>
-                          <button
-                            className="flex items-center gap-2 rounded-2xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--border-strong)]"
-                            onClick={() => {
-                              void handleRestoreSnapshot(snapshot.id);
-                            }}
-                            type="button"
-                          >
-                            <RotateCcw className="h-4 w-4" />
-                            Restaurar
-                          </button>
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
-                          <span className="rounded-full bg-[var(--surface)] px-3 py-1">
-                            {snapshot.bundle.tasks.length} tarefas
-                          </span>
-                          <span className="rounded-full bg-[var(--surface)] px-3 py-1">
-                            {snapshot.bundle.dependencies.length} dependências
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/70 px-4 py-8 text-center text-sm text-[var(--muted)]">
-                      Nenhum snapshot salvo ainda. Crie um snapshot antes de tentar restaurar.
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.25fr)]">
-              <div className="panel-card rounded-[32px] p-4">
-                <div className="mb-4 flex items-center justify-between gap-3 px-2">
-                  <div>
-                    <p className="text-sm font-semibold text-[var(--foreground)]">
-                      Grade de tarefas
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--muted)]">
-                      Edite nome, datas, duracao, dependencias com tipo e lag, alem da hierarquia e da ordem visual.
-                    </p>
-                  </div>
-                  <span className="mono rounded-full bg-white px-3 py-1 text-xs font-semibold text-[var(--muted)]">
-                    {visibleTasks.length} linhas visiveis
+                  <span className="mono text-xs font-semibold text-[var(--muted-soft)]">
+                    {visibleTasks.length} linhas
                   </span>
                 </div>
                 <TaskGrid
+                  ref={taskGridRef}
+                  headerOffset={taskHeaderOffset}
+                  rowHeight={gridRowHeight}
                   onAddBelow={(taskId) => {
                     void handleAddTask(taskId);
                   }}
@@ -1449,7 +1406,9 @@ export function PlannerWorkspace() {
                     }));
                   }}
                   onCommitStartDate={(taskId, startDate) => {
-                    void updateTask(taskId, (task) => buildTaskPatchFromDates(task, startDate, task.endDate));
+                    void updateTask(taskId, (task) =>
+                      buildTaskPatchFromDates(task, startDate, task.endDate),
+                    );
                   }}
                   onDelete={(taskId) => {
                     void handleDeleteTask(taskId);
@@ -1466,6 +1425,9 @@ export function PlannerWorkspace() {
                   onOutdent={(taskId) => {
                     void handleOutdentTask(taskId);
                   }}
+                  onReorder={(taskId, targetIndex) => {
+                    void handleReorderTask(taskId, targetIndex);
+                  }}
                   onSelectTask={(taskId) => {
                     void updateView({ selectedTaskId: taskId });
                   }}
@@ -1476,8 +1438,26 @@ export function PlannerWorkspace() {
                   tasks={visibleTasks}
                 />
               </div>
+            </section>
+          ) : null}
 
+          {workspaceView === "split" ? (
+            <div className="hidden bg-[var(--border)] lg:flex lg:items-stretch lg:justify-center">
+              <button
+                aria-label="Redimensionar tarefas e Gantt"
+                className="group flex h-full w-full cursor-col-resize items-center justify-center bg-[var(--border)] transition hover:bg-[var(--panel-strong)]"
+                onPointerDown={startResizeTaskPane}
+                type="button"
+              >
+                <span className="h-20 w-[2px] rounded-full bg-[var(--border-strong)] group-hover:bg-[var(--accent)]" />
+              </button>
+            </div>
+          ) : null}
+
+          {showGanttPane ? (
+            <section className="min-h-0 bg-white">
               <GanttPanel
+                appearance={appearance}
                 onDateChange={(taskId, startDate, endDate) => {
                   const targetTask = resolvedProject.tasks.find((task) => task.id === taskId);
                   const resolvedTask = resolvedProject.resolvedTasks.find(
@@ -1486,11 +1466,13 @@ export function PlannerWorkspace() {
                   if (!targetTask || resolvedTask?.isSummary) {
                     pushNotice(
                       "info",
-                      "Tarefas-resumo sao recalculadas pelas subtarefas e nao podem ser movidas direto no Gantt.",
+                      "Tarefas-resumo são recalculadas pelas subtarefas e não podem ser movidas direto no Gantt.",
                     );
                     return;
                   }
-                  void updateTask(taskId, (task) => buildTaskPatchFromDates(task, startDate, endDate));
+                  void updateTask(taskId, (task) =>
+                    buildTaskPatchFromDates(task, startDate, endDate),
+                  );
                 }}
                 onSelectTask={(taskId) => {
                   void updateView({ selectedTaskId: taskId });
@@ -1503,30 +1485,31 @@ export function PlannerWorkspace() {
                 selectedTaskId={resolvedProject.view?.selectedTaskId ?? null}
                 tasks={visibleTasks}
                 viewMode={resolvedProject.view?.chartViewMode ?? "Week"}
+                onVerticalScroll={handleGanttVerticalScroll}
               />
-            </div>
-          </main>
-
-          <InspectorPanel
-            onToggleOpen={() => {
-              void updateView({
-                rightPanelOpen: !(resolvedProject.view?.rightPanelOpen ?? true),
-              });
-            }}
-            onUpdateNotes={(taskId, notes) => {
-              void updateTask(taskId, (task) => ({ ...task, notes }));
-            }}
-            onUpdateProgress={(taskId, progress) => {
-              void updateTask(taskId, (task) => ({
-                ...task,
-                progress: Math.max(0, Math.min(progress, 100)),
-              }));
-            }}
-            project={resolvedProject}
-            task={selectedTask}
-          />
+            </section>
+          ) : null}
         </div>
-      </div>
+      </main>
+
+      {isSnapshotsOpen ? (
+        <SnapshotDrawer
+          onClose={() => setIsSnapshotsOpen(false)}
+          onRestore={(snapshotId) => {
+            void handleRestoreSnapshot(snapshotId);
+          }}
+          projectName={resolvedProject.project.name}
+          snapshots={resolvedProject.snapshots}
+        />
+      ) : null}
+
+      <PlannerSettingsDrawer
+        isOpen={isSettingsOpen}
+        onChange={handleAppearanceChange}
+        onClose={() => setIsSettingsOpen(false)}
+        onReset={resetAppearance}
+        settings={appearance}
+      />
     </div>
   );
 }
