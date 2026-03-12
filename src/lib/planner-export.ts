@@ -106,7 +106,7 @@ export async function exportGanttPdf(
     width: image.width,
     height: image.height,
   });
-  const pdfBytes = await pdf.save();
+  const pdfBytes = new Uint8Array(await pdf.save());
   downloadBlob(
     new Blob([pdfBytes], { type: "application/pdf" }),
     `${createFileSlug(project)}-gantt.pdf`,
